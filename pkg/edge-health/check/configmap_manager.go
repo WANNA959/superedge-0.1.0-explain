@@ -32,6 +32,13 @@ import (
 
 var ConfigMapManager *ConfigMapController
 
+type ConfigMapController struct {
+	clientset             kubernetes.Interface
+	ConfigMapInformer     coreinformers.ConfigMapInformer
+	ConfigMapLister       corelisters.ConfigMapLister
+	ConfigMapListerSynced cache.InformerSynced
+}
+
 func NewConfigMapController(clientset kubernetes.Interface) *ConfigMapController {
 	SharedInformerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
 	configMapInformer := SharedInformerFactory.Core().V1().ConfigMaps()
@@ -49,13 +56,6 @@ func NewConfigMapController(clientset kubernetes.Interface) *ConfigMapController
 	n.ConfigMapListerSynced = configMapInformer.Informer().HasSynced
 	ConfigMapManager = n
 	return n
-}
-
-type ConfigMapController struct {
-	clientset             kubernetes.Interface
-	ConfigMapInformer     coreinformers.ConfigMapInformer
-	ConfigMapLister       corelisters.ConfigMapLister
-	ConfigMapListerSynced cache.InformerSynced
 }
 
 func (n *ConfigMapController) handleConfigMapAddUpdate(obj interface{}) {

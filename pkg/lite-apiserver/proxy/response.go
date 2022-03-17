@@ -22,6 +22,7 @@ import (
 )
 
 // EdgeResponseDataHolder hold all data of a response
+// 状态码 消息体 消息头
 type EdgeResponseDataHolder struct {
 	Code   int                 `json:"code"`
 	Body   []byte              `json:"body"`
@@ -36,6 +37,7 @@ func NewEdgeResponseDataHolder(res *http.Response) *EdgeResponseDataHolder {
 	return d
 }
 
+// 序列化和反序列化
 func (holder *EdgeResponseDataHolder) Output() ([]byte, error) {
 	res, err := json.Marshal(holder)
 	if err != nil {

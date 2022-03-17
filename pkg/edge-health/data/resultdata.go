@@ -56,7 +56,9 @@ func (r *ResultData) SetResult(c *CommunicateData) {
 	if _, ok := r.Result[c.SourceIP]; !ok {
 		r.Result[c.SourceIP] = make(map[string]ResultDetail)
 	}
-	for k, v := range c.ResultDetail { //change time be local time, different machines have different time
+
+	//change time be local time, different machines have different time
+	for k, v := range c.ResultDetail {
 		v.Time = time.Now()
 		c.ResultDetail[k] = v
 	}

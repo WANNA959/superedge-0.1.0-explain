@@ -34,6 +34,7 @@ func PrintFlags(flags *pflag.FlagSet) {
 
 func UpdateLogLevel(w http.ResponseWriter, r *http.Request) {
 	switch {
+	// 只允许put verb类型http访问
 	case r.Method == "PUT":
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
@@ -56,6 +57,7 @@ func UpdateLogLevel(w http.ResponseWriter, r *http.Request) {
 
 func updateLogLevel(val string) (string, error) {
 	var level klog.Level
+	// 更改klog level， val必须parse int——level
 	if err := level.Set(val); err != nil {
 		return "", fmt.Errorf("failed set klog.logging.verbosity %s: %v", val, err)
 	}

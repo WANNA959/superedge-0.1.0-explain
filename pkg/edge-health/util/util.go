@@ -36,6 +36,8 @@ func GenerateHmac(communicatedata data.CommunicateData) (string, error) {
 	part1byte, _ := json.Marshal(communicatedata.SourceIP)
 	part2byte, _ := json.Marshal(communicatedata.ResultDetail)
 	hmacBefore := string(part1byte) + string(part2byte)
+	// common.HmacConfig这个configMap 下的 common.HmacKey 字段作为 hash key
+	// sourceip+ResultDetail string作为value进行sha256加密
 	if hmacconf, err := check.ConfigMapManager.ConfigMapLister.ConfigMaps("kube-system").Get(common.HmacConfig); err != nil {
 		return "", err
 	} else {
@@ -48,6 +50,11 @@ func GetHmacCode(s, key string) (string, error) {
 	if _, err := io.WriteString(h, s); err != nil {
 		return "", err
 	}
+	/*
+		执行原理为：myHash.Write(b1)写入的数据进行hash运算  +  myHash.Sum(b2)写入的数据进行hash运算
+		结果为：两个hash运算结果的拼接。若myHash.Write()省略或myHash.Write(nil) ，则默认为写入的数据为“”。
+		根据以上原理，一般不采用两个hash运算的拼接，所以参数为nil
+	*/
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
@@ -67,6 +74,7 @@ func GetNodeNameByIp(nodes []v1.Node, Ip string) string {
 func SignalWatch() (context.Context, context.CancelFunc) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	signals := make(chan os.Signal, 1)
+	// 监控两种signal 后面goroutine都可以通过ctx cnacel优雅退出
 	signal.Notify(signals, unix.SIGTERM, unix.SIGINT)
 	go func() {
 		for range signals {

@@ -32,8 +32,9 @@ import (
 )
 
 type CertManager struct {
-	config       *config.LiteServerConfig
-	caPath       string
+	config *config.LiteServerConfig
+	caPath string
+	//golang net/http库发送http请求，最后都是调用 transport的 RoundTrip方法
 	transportMap map[string]*http.Transport
 
 	defaultTr *http.Transport
@@ -82,6 +83,7 @@ func (m *CertManager) DefaultTransport() *http.Transport {
 }
 
 func (m *CertManager) loadTransport() error {
+	// 遍历server的TLSKeyPair
 	for i := range m.config.TLSConfig {
 		cert := m.config.TLSConfig[i].CertPath
 		key := m.config.TLSConfig[i].KeyPath
@@ -93,7 +95,9 @@ func (m *CertManager) loadTransport() error {
 			return err
 		}
 
+		// 为了解析common name
 		var leaf *x509.Certificate
+		// 不存在，parse生成，存在，直接赋值
 		if tlsCert.Leaf == nil {
 			l, err := x509.ParseCertificate(tlsCert.Certificate[0])
 			if err != nil {
@@ -120,7 +124,9 @@ func (m *CertManager) loadTransport() error {
 		pool := x509.NewCertPool()
 		pool.AppendCertsFromPEM(caCrt)
 
+		// 根据tls配置（X509.certPool读取caFile的byte数组+tls证书：根据TLSKeyPair读出）作为TLSClientConfig 构建http.transport
 		tr := makeTransport(&tls.Config{RootCAs: pool, Certificates: []tls.Certificate{tlsCert}})
+		// commonName作为key
 		m.transportMap[commonName] = tr
 		klog.Infof("Add common %s in tls map", commonName)
 	}
@@ -134,6 +140,8 @@ func makeTransport(tlsClientConfig *tls.Config) *http.Transport {
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
+		// 使用环境变量的代理
+		// 代码主要读取 HTTP_PROXY、HTTPS_PROXY、NO_PROXY 和 REQUEST_METHOD
 		Proxy:                 http.ProxyFromEnvironment,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,

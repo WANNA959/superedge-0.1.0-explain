@@ -36,7 +36,8 @@ type FileStorage struct {
 
 func NewFileStorage(config *config.LiteServerConfig) *FileStorage {
 	s := &FileStorage{
-		seed:     rand.New(rand.NewSource(time.Now().Unix())),
+		seed: rand.New(rand.NewSource(time.Now().Unix())),
+		// 默认/data/lite-apiserver/cache下
 		filePath: config.FileCachePath,
 	}
 

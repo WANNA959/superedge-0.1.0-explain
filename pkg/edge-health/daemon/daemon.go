@@ -49,17 +49,21 @@ type EdgeDaemon struct {
 
 func NewEdgeHealthDaemon(o options.CompletedOptions) Daemon {
 	return EdgeDaemon{
-		HealthCheckPeriod:     o.CheckOptions.HealthCheckPeriod,
-		HealthCheckScoreLine:  o.CheckOptions.HealthCheckScoreLine,
+		HealthCheckPeriod:    o.CheckOptions.HealthCheckPeriod,
+		HealthCheckScoreLine: o.CheckOptions.HealthCheckScoreLine,
+
 		CommunicatePeriod:     o.CommunOptions.CommunicatePeriod,
 		CommunicateTimeout:    o.CommunOptions.CommunicateTimeout,
 		CommunicateRetryTime:  o.CommunOptions.CommunicateRetryTime,
 		CommunicateServerPort: o.CommunOptions.CommunicateServerPort,
-		VotePeriod:            o.VoteOptions.VotePeriod,
-		VoteTimeOut:           o.VoteOptions.VoteTimeOut,
-		MasterUrl:             o.NodeOptions.MasterUrl,
-		KubeconfigPath:        o.NodeOptions.KubeconfigPath,
-		HostName:              o.NodeOptions.HostName,
+
+		VotePeriod:  o.VoteOptions.VotePeriod,
+		VoteTimeOut: o.VoteOptions.VoteTimeOut,
+
+		// 没有default flag传参
+		MasterUrl:      o.NodeOptions.MasterUrl,
+		KubeconfigPath: o.NodeOptions.KubeconfigPath,
+		HostName:       o.NodeOptions.HostName,
 	}
 }
 
@@ -72,20 +76,37 @@ func (d EdgeDaemon) Run(ctx context.Context) {
 	check := checkpkg.NewCheckEdge(checkplugin.PluginInfo.Plugins, d.HealthCheckPeriod, d.HealthCheckScoreLine)
 
 	//TODO: Template pattern
+
+	// 起一个goroutinue run NodeController：主要通过node Informrr处理nodeList的变动
 	go checkpkg.NewNodeController(common.ClientSet).Run(ctx)
+
+	// 同NodeController相似：起一个goroutinue run CM Controller：主要通过CM Informrr处理configMap的变动
 	go checkpkg.NewConfigMapController(common.ClientSet).Run(ctx)
+
+	// 起一个goroutine，每隔一定的时间，运行check.GetNodeList，直到接收到结束信号 就关闭这个协程
 	go wait.Until(check.GetNodeList, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done())
+
+	// 起一个goroutine，每隔一定的时间，运行check.Check，直到接收到结束信号 就关闭这个协程
 	go wait.Until(check.Check, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done())
 
+	// init commun
 	commun := communicate.NewCommunicateEdge(d.CommunicatePeriod, d.CommunicateTimeout, d.CommunicateRetryTime, d.CommunicateServerPort)
 	//TODO: Template pattern
 	wg.Add(1)
+
+	// 起一个commun server监听 /result
 	go commun.Server(ctx, &wg)
+
+	// 起一个goroutine，每隔一定的时间，运行commun.Client，直到接收到结束信号 就关闭这个协程
 	go wait.Until(commun.Client, time.Duration(commun.GetPeriod())*time.Second, ctx.Done())
 
+	// init vote
 	vote := vote.NewVoteEdge(d.VoteTimeOut, d.VotePeriod)
+
+	// 起一个goroutine，每隔一定的时间，运行vote.Vote，直到接收到结束信号 就关闭这个协程
 	go wait.Until(vote.Vote, time.Duration(vote.GetVotePeriod())*time.Second, ctx.Done())
 
+	// 阻塞
 	for range ctx.Done() {
 		wg.Wait()
 		return

@@ -21,12 +21,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	log "k8s.io/klog"
+	admissionutil "superedge/pkg/edge-health-admission/util"
 	"superedge/pkg/edge-health/check"
 	"superedge/pkg/edge-health/common"
 	"superedge/pkg/edge-health/data"
 	"superedge/pkg/edge-health/util"
 	"time"
-	admissionutil "superedge/pkg/edge-health-admission/util"
 )
 
 var UnreachNoExecuteTaint = &corev1.Taint{
@@ -67,11 +67,13 @@ func (vote VoteEdge) Vote() {
 	tempNodeStatus := data.Result.CopyResultDataAll() //map[string]map[string]ResultDetail string:checker ip string:checked ip bool:noraml
 	for k, v := range tempNodeStatus {                //k is checker ip
 		for ip, resultdetail := range v { //ip is checked ip
+			// 本node or 其他没有voteTimeout的node
 			if k == common.LocalIp || (k != common.LocalIp && !time.Now().After(resultdetail.Time.Add(time.Duration(vote.GetVoteTimeout())*time.Second))) {
 				healthNodeMap[k] = "" //node is a health node if it has at least one valid check
 				if _, ok := voteCountMap[ip]; !ok {
 					voteCountMap[ip] = make(map[string]int)
 				}
+				// 统计某个ip的票数
 				if resultdetail.Normal {
 					if _, ok := voteCountMap[ip]["yes"]; !ok {
 						voteCountMap[ip]["yes"] = 0
@@ -89,6 +91,7 @@ func (vote VoteEdge) Vote() {
 	log.V(4).Infof("Vote: healthNodeMap is %v , voteCountMap is %v", healthNodeMap, voteCountMap)
 
 	//num := (float64(len(healthNodeMap)) + 1) / 2
+	// 必须是majority vote（or not vote）
 	num := (float64(data.CheckInfoResult.GetLenCheckInfo()) + 1) / 2
 
 	if len(healthNodeMap) == 1 {
@@ -100,6 +103,7 @@ func (vote VoteEdge) Vote() {
 				log.V(4).Infof("vote: vote yes to master begin")
 				name := util.GetNodeNameByIp(data.NodeList.NodeList.Items, ip)
 				if node, err := check.NodeManager.NodeLister.Get(name); err == nil && name != "" {
+					// alive，如果有nodeunhealth，删除，更新NodeList
 					if _, ok := node.Annotations["nodeunhealth"]; ok {
 						nodenew := node.DeepCopy()
 						delete(nodenew.Annotations, "nodeunhealth")
@@ -108,7 +112,8 @@ func (vote VoteEdge) Vote() {
 						} else {
 							log.V(2).Infof("update yes vote of %s to master", nodenew.Name)
 						}
-					} else if index, flag := admissionutil.TaintExistsPosition(node.Spec.Taints, UnreachNoExecuteTaint); flag{
+					} else if index, flag := admissionutil.TaintExistsPosition(node.Spec.Taints, UnreachNoExecuteTaint); flag {
+						// 如果node taints中有UnreachNoExecuteTaint，则删除
 						nodenew := node.DeepCopy()
 						nodenew.Spec.Taints = append(nodenew.Spec.Taints[:index], nodenew.Spec.Taints[index+1:]...)
 						if _, err := common.ClientSet.CoreV1().Nodes().Update(context.TODO(), nodenew, metav1.UpdateOptions{}); err != nil {
@@ -120,6 +125,7 @@ func (vote VoteEdge) Vote() {
 				}
 			}
 		}
+
 		if _, ok := v["no"]; ok {
 			if float64(v["no"]) >= num {
 				log.V(4).Infof("vote: vote no to master begin")
@@ -127,6 +133,7 @@ func (vote VoteEdge) Vote() {
 				if node, err := check.NodeManager.NodeLister.Get(name); err == nil && name != "" {
 					if _, ok := node.Annotations["nodeunhealth"]; !ok {
 						nodenew := node.DeepCopy()
+						// 添加annotation nodeunhealth
 						nodenew.Annotations["nodeunhealth"] = "yes"
 						if _, err := common.ClientSet.CoreV1().Nodes().Update(context.TODO(), nodenew, metav1.UpdateOptions{}); err != nil {
 							log.Errorf("update no vote to master error: %v ", err)

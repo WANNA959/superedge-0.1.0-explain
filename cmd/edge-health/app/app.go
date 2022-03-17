@@ -43,6 +43,7 @@ func NewEdgeHealthCommand(ctx context.Context) *cobra.Command {
 				klog.Fatalf("options validate err: %v", errs)
 			}
 
+			// pkg run here
 			daemon.NewEdgeHealthDaemon(completedOptions).Run(ctx)
 		},
 	}

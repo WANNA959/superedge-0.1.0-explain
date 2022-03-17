@@ -46,6 +46,7 @@ func (n *NodeListData) SetNodeListDataByNode(node v1.Node) {
 	n.NodeListMu.Lock()
 	defer n.NodeListMu.Unlock()
 	var flag bool
+	// 该node name存在，更新node，否则append
 	for k, existNode := range n.NodeList.Items {
 		if existNode.Name == node.Name {
 			n.NodeList.Items[k] = node

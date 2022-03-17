@@ -64,6 +64,7 @@ func (c CommunicateEdge) Server(ctx context.Context, wg *sync.WaitGroup) {
 	srv := &http.Server{Addr: ":" + strconv.Itoa(c.CommunicateServerPort)}
 	srv.ReadTimeout = time.Duration(c.CommunicateTimeout) * time.Second
 	srv.WriteTimeout = time.Duration(c.CommunicateTimeout) * time.Second
+
 	http.HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
 		var communicatedata data.CommunicateData
 		if r.Body == nil {
@@ -81,6 +82,8 @@ func (c CommunicateEdge) Server(ctx context.Context, wg *sync.WaitGroup) {
 		if _, err := io.WriteString(w, "Received!\n"); err != nil {
 			log.Errorf("Communicate Server: send response err : %v", err)
 		}
+
+		// 认证
 		if hmac, err := util.GenerateHmac(communicatedata); err != nil {
 			log.Errorf("Communicate Server: server GenerateHmac err: %v", err)
 			return
@@ -93,18 +96,21 @@ func (c CommunicateEdge) Server(ctx context.Context, wg *sync.WaitGroup) {
 		}
 		log.V(4).Infof("Communicate Server: Hmac match")
 
+		// map sourceIp resultDetail
 		data.Result.SetResult(&communicatedata)
 		log.V(4).Infof("After communicate, result is %v", data.Result.Result)
 	})
 
 	http.HandleFunc("/debug/flags/v", pkgutil.UpdateLogLevel)
 
+	// server listen
 	go func() {
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatalf("Server: exit with error: %v", err)
 		}
 	}()
 
+	// 阻塞
 	for range ctx.Done() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		cancel()
@@ -118,12 +124,16 @@ func (c CommunicateEdge) Server(ctx context.Context, wg *sync.WaitGroup) {
 func (c CommunicateEdge) Client() {
 	if _, ok := data.Result.Result[common.LocalIp]; ok {
 		tempCommunicateData := data.Result.CopyLocalResultData(common.LocalIp)
+
+		// 同步
 		wg := sync.WaitGroup{}
 		wg.Add(len(tempCommunicateData))
 		for k := range tempCommunicateData { //send to
-			des := k
+			des := k // checked ip
 			go func(wg *sync.WaitGroup) {
+				// 本身不需要发送
 				if des != common.LocalIp {
+					// 重试
 					for i := 0; i < c.CommunicateRetryTime; i++ {
 						u := data.CommunicateData{SourceIP: common.LocalIp, ResultDetail: tempCommunicateData}
 						if hmac, err := util.GenerateHmac(u); err != nil {
@@ -135,6 +145,7 @@ func (c CommunicateEdge) Client() {
 						requestByte, _ := json.Marshal(u)
 						requestReader := bytes.NewReader(requestByte)
 						ok := func() bool {
+							// 构建client，put /result————跟 common server对应
 							client := http.Client{Timeout: time.Duration(c.CommunicateTimeout) * time.Second}
 							req, err := http.NewRequest("PUT", "http://"+des+":"+strconv.Itoa(c.CommunicateServerPort)+"/result", requestReader)
 							if err != nil {
@@ -152,6 +163,11 @@ func (c CommunicateEdge) Client() {
 									res.Body.Close()
 								}
 							}()
+							/*
+								没有加入读取resp.Body的代码。可以看到此时关闭Body读取数据通道，会导致Golang底层没有真正关闭连接。
+								要解决这个这种场景出现的连接泄露问题，
+								需要在Close前额外加入io.Copy(ioutil.Discard, resp.Body)，来完成TCP响应体读取流程
+							*/
 							if _, err := io.Copy(ioutil.Discard, res.Body); err != nil {
 								log.Errorf("io copy err: %s", err.Error())
 							}
@@ -171,6 +187,7 @@ func (c CommunicateEdge) Client() {
 				wg.Done()
 			}(&wg)
 		}
+		// 阻塞
 		wg.Wait()
 	}
 }

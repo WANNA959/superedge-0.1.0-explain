@@ -53,21 +53,26 @@ func (s *LiteServer) Run() error {
 
 	// prepare tls manager
 	certManager := edgetls.NewCertManager(s.ServerConfig)
+	// 初始化CertManager：主要工作在于通过ca+TLSKeyPair构建 map commonName：http.transport
 	err := certManager.Init()
 	if err != nil {
 		klog.Errorf("Init certManager error: %v", err)
 		return err
 	}
 
+	// 初始化请求缓存控制器
 	cacher := proxy.NewRequestCacheController(s.ServerConfig, certManager)
+	// 起一个goroutine监控request channel
 	go cacher.Run(s.stopCh)
 
+	// 初始化handler
 	edgeServerHandler, err := proxy.NewEdgeServerHandler(s.ServerConfig, certManager, cacher)
 	if err != nil {
 		klog.Errorf("Create edgeServerHandler error: %v", err)
 		return err
 	}
 
+	// 设置多路复用处理函数 绑定handler
 	mux := http.NewServeMux()
 	mux.Handle("/", edgeServerHandler)
 	mux.HandleFunc("/debug/flags/v", util.UpdateLogLevel)
@@ -80,6 +85,7 @@ func (s *LiteServer) Run() error {
 	pool := x509.NewCertPool()
 	pool.AppendCertsFromPEM(caCrt)
 
+	// init lite-apiserver instance
 	ser := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", s.ServerConfig.Port),
 		Handler: mux,
@@ -88,6 +94,7 @@ func (s *LiteServer) Run() error {
 			ClientAuth: tls.VerifyClientCertIfGiven,
 		},
 	}
+	// run lite-apiserver
 	go func() {
 		klog.Infof("Listen on %s", ser.Addr)
 		klog.Fatal(ser.ListenAndServeTLS(s.ServerConfig.CertFile, s.ServerConfig.KeyFile))
@@ -98,6 +105,8 @@ func (s *LiteServer) Run() error {
 	//	klog.Info("Received a program exit signal")
 	//	return nil
 	//}
+
+	// 在此阻塞
 	<-s.stopCh
 	klog.Info("Received a program exit signal")
 	return nil

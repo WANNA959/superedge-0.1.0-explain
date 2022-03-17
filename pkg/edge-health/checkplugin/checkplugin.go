@@ -24,6 +24,7 @@ import (
 	"sync"
 )
 
+// 共有KubeletCheck、KubeletAuthCheck、PingCheckPlugin三个plugin实现了此interface，以kubeletcheck为例注释
 type CheckPlugin interface {
 	CheckExecute(wg *sync.WaitGroup)
 	Name() string
@@ -83,6 +84,7 @@ func (p *Plugin) AddPlugin(plugin CheckPlugin) {
 	klog.V(4).Info("add ok")
 }
 
+// StatusOK表示成功 return true
 func PingDo(client http.Client, req *http.Request) (bool, error) {
 	var (
 		response []byte

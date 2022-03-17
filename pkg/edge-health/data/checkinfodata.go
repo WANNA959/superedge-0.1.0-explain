@@ -32,6 +32,7 @@ type CheckInfoData struct {
 }
 
 func NewCheckInfoData() CheckInfoData {
+	// 单例，只执行一次
 	CheckOnce.Do(func() {
 		CheckInfoResult = CheckInfoData{
 			CheckInfo:       make(map[string]map[string]float64),

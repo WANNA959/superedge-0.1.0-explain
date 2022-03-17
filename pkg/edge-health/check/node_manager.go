@@ -32,30 +32,38 @@ import (
 
 var NodeManager *NodeController
 
-func NewNodeController(clientset kubernetes.Interface) *NodeController {
-	SharedInformerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
-	nodeInformer := SharedInformerFactory.Core().V1().Nodes()
-	n := &NodeController{}
-	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: n.handleNodeAddUpdate,
-		UpdateFunc: func(old, cur interface{}) {
-			n.handleNodeAddUpdate(cur)
-		},
-		DeleteFunc: n.handleNodeDelete,
-	})
-	n.clientset = clientset
-	n.NodeInformer = nodeInformer
-	n.NodeLister = nodeInformer.Lister()
-	n.NodeListerSynced = nodeInformer.Informer().HasSynced
-	NodeManager = n
-	return n
-}
-
 type NodeController struct {
 	clientset        kubernetes.Interface
 	NodeInformer     coreinformers.NodeInformer
 	NodeLister       corelisters.NodeLister
 	NodeListerSynced cache.InformerSynced
+}
+
+func NewNodeController(clientset kubernetes.Interface) *NodeController {
+	SharedInformerFactory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
+	// NodeInformer为node提供对共享的informer和lister的访问
+	nodeInformer := SharedInformerFactory.Core().V1().Nodes()
+	n := &NodeController{}
+	// add event handler
+	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		// 修改data.NodeList
+		// 添加node触发
+		AddFunc: n.handleNodeAddUpdate,
+		// 更新node触发
+		UpdateFunc: func(old, cur interface{}) {
+			n.handleNodeAddUpdate(cur)
+		},
+		// 删除node触发
+		DeleteFunc: n.handleNodeDelete,
+	})
+	n.clientset = clientset
+	n.NodeInformer = nodeInformer
+	// NodeLister helps list Nodes.
+	n.NodeLister = nodeInformer.Lister()
+	// 如果至少一个完整的 LIST 通知了informar的对象集合的授权状态，则 HasSynced 返回 true
+	n.NodeListerSynced = nodeInformer.Informer().HasSynced
+	NodeManager = n
+	return n
 }
 
 func (n *NodeController) handleNodeAddUpdate(obj interface{}) {

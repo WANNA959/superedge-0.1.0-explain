@@ -17,15 +17,19 @@ limitations under the License.
 package options
 
 import (
-	"superedge/pkg/edge-health/options"
 	cliflag "k8s.io/component-base/cli/flag"
+	"superedge/pkg/edge-health/options"
 )
 
 type Options struct {
-	CheckOptions  *options.CheckOptions
+	// check相关
+	CheckOptions *options.CheckOptions
+	// 通信相关
 	CommunOptions *options.CommunOptions
-	NodeOptions   *options.NodeOptions
-	VoteOptions   *options.VoteOptions
+	// master相关
+	NodeOptions *options.NodeOptions
+	// vote相关
+	VoteOptions *options.VoteOptions
 }
 
 func NewEdgeHealthOptions() *Options {

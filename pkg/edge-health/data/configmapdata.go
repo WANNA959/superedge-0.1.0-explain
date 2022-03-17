@@ -21,6 +21,8 @@ import (
 	"sync"
 )
 
+// 同nodelistdata
+
 var (
 	ConfigMapListOnce sync.Once
 	ConfigMapListMu   sync.Mutex

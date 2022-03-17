@@ -30,9 +30,12 @@ import (
 )
 
 func initialize(masterUrl, kubeconfigPath, hostName string) {
+	// init common.go下三个变量
 	initClientSet(masterUrl, kubeconfigPath)
 	initHostName(hostName)
 	initLocalIp()
+
+	// init data下变量
 	initData()
 }
 
@@ -65,6 +68,7 @@ func initLocalIp() {
 		klog.Fatalf("Init: Error getting hostname node: %s", err.Error())
 	} else {
 		for _, v := range host.Status.Addresses {
+			// type：one of Hostname, ExternalIP or InternalIP.
 			if v.Type == v1.NodeInternalIP {
 				common.LocalIp = v.Address
 				klog.V(2).Infof("Init: host ip is %s", common.LocalIp)

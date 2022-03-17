@@ -30,12 +30,15 @@ import (
 	"superedge/cmd/lite-apiserver/app"
 )
 
+// lite-apiserver入口地址
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
 	command := app.NewServerCommand()
 
+	// flag _替换为-
 	pflag.CommandLine.SetNormalizeFunc(cliflag.WordSepNormalizeFunc)
+	// 支持go flag
 	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 	logs.InitLogs()
 	defer logs.FlushLogs()

@@ -58,6 +58,7 @@ func NewEdgeServerHandler(config *config.LiteServerConfig, manager *cert.CertMan
 }
 
 func (h *EdgeServerHandler) buildHandlerChain(edgeHandler http.Handler) http.Handler {
+	// /api resolver group
 	cfg := &server.Config{
 		LegacyAPIGroupPrefixes: sets.NewString(server.DefaultLegacyAPIPrefix),
 	}
@@ -66,6 +67,10 @@ func (h *EdgeServerHandler) buildHandlerChain(edgeHandler http.Handler) http.Han
 	return handler
 }
 
+// 实现了http.Handler：本质是一个handler
+//type Handler interface {
+//	ServeHTTP(w ResponseWriter, r *Request)
+//}
 func (h *EdgeServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reverseProxy := NewEdgeReverseProxy(r, h.manager, h.apiserverUrl, h.apiserverPort, h.timeout, h.storage, h.cacher)
 	reverseProxy.backendProxy.ServeHTTP(w, r)

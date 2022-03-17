@@ -65,6 +65,7 @@ func (h *holder) start() {
 	klog.V(2).Infof("Start holder %s", h.key)
 	h.isStart = true
 	h.ticker = time.NewTicker(h.syncTime)
+	// holder request都添加到request channel
 	go h.run()
 }
 
@@ -86,6 +87,7 @@ func (h *holder) run() {
 			klog.Infof("Stop holder %s loop", h.key)
 			return
 		case <-h.ticker.C:
+			// 定时器，watch的polling方式：周期性将list request（对应watch）加入到request channel中
 			h.requestCh <- h.request
 		}
 	}
@@ -123,6 +125,7 @@ func NewRequestCacheController(config *config.LiteServerConfig, certManager *cer
 
 func (c *RequestCacheController) Run(stopCh <-chan struct{}) {
 	klog.Infof("Request cache controller begin run")
+	// 起一个goroutine周期性检测watch+list，并回收close、expire的请求连接
 	go c.runGC(stopCh)
 	for {
 		select {
@@ -160,12 +163,15 @@ func (c *RequestCacheController) doRequest(r *http.Request) {
 		Transport: tr,
 	}
 
+	// 127.0.0.1:51003/xxx
+	// server requests, the r.URL is parsed from the URI
 	newReq, err := http.NewRequest(r.Method, fmt.Sprintf("%s%s", c.url, r.URL.String()), bytes.NewReader([]byte{}))
 	if err != nil {
 		klog.Errorf("parse path error %v", err)
 		return
 	}
 	CopyHeader(newReq.Header, r.Header)
+	// EdgeUpdateHeader:当前时间
 	newReq.Header.Set(EdgeUpdateHeader, time.Now().String())
 	defer newReq.Body.Close()
 
@@ -184,6 +190,7 @@ func (c *RequestCacheController) doRequest(r *http.Request) {
 }
 
 func (c *RequestCacheController) runGC(stopCh <-chan struct{}) {
+	// 两个定时器，周期性执行
 	watchGCTicker := time.NewTicker(time.Second)
 	listGCTicker := time.NewTicker(5 * time.Second)
 
@@ -193,12 +200,16 @@ func (c *RequestCacheController) runGC(stopCh <-chan struct{}) {
 			klog.Infof("receive stop channel, exit request gc controller")
 			return
 		case <-listGCTicker.C:
+			// 每5s执行一次
 			c.lock.Lock()
 			for k, l := range c.listRequestMap {
+				// list中存在，watch中不存在
 				if _, e := c.watchRequestMap[k]; !e {
 					var newList = []*holder{}
+					// 遍历list中的holder
 					for i := range l {
 						h := l[i]
+						// 没有watch，isStart=false
 						if h.expired() {
 							klog.Infof("request key %s, url %s has expired, delete it", k, h.request.URL.Path)
 						} else {
@@ -214,12 +225,14 @@ func (c *RequestCacheController) runGC(stopCh <-chan struct{}) {
 			}
 			c.lock.Unlock()
 		case <-watchGCTicker.C:
+			// 每1s执行一次，检查watch请求连接是否关闭
 			c.lock.Lock()
 			for k, r := range c.watchRequestMap {
 				req := r
 				select {
 				case <-req.Context().Done():
 					klog.V(4).Infof("Watch %s connection closed.", k)
+					// watch关闭，对应key的list holder都close
 					holderList, e := c.listRequestMap[k]
 					if e {
 						for i := range holderList {
@@ -227,7 +240,9 @@ func (c *RequestCacheController) runGC(stopCh <-chan struct{}) {
 						}
 					}
 					delete(c.watchRequestMap, k)
+					// 没有delete listRequestMap，放在listGCTicker.C里面做
 				default:
+					// 不会阻塞
 				}
 			}
 			c.lock.Unlock()
@@ -244,6 +259,12 @@ func (c *RequestCacheController) runGC(stopCh <-chan struct{}) {
 // RawQuery allowWatchBookmarks=true&resourceVersion=1886882&timeout=8m1s&timeoutSeconds=481&watch=true
 //
 // we check request pair by url.path
+
+/*
+提供list和watch服务的入口是同一个，在API接口中是通过 GET /pods?watch=true 这种方式来区分是list还是watch
+List-Watch 的机制
+scheduler、controller manager、kubelet会watch apiserver端口（对关心的resource
+*/
 func (c *RequestCacheController) AddRequest(r *http.Request, userAgent string, list bool, watch bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -282,6 +303,7 @@ func (c *RequestCacheController) addListRequest(req *http.Request, userAgent str
 	key := c.key(userAgent, req.URL.Path)
 
 	_, e := c.listRequestMap[key]
+	// 已经存在则不添加
 	if !e {
 		klog.Infof("Add new list request %s", key)
 		h := newHolder(req, key, c.syncTime, c.requestCh)
@@ -293,6 +315,7 @@ func (c *RequestCacheController) addListRequest(req *http.Request, userAgent str
 func (c *RequestCacheController) addWatchRequest(req *http.Request, userAgent string) {
 	key := c.key(userAgent, req.URL.Path)
 
+	// 添加watch request之后，对应的list request需要添加到request channel
 	holderList, e := c.listRequestMap[key]
 	if !e {
 		klog.Infof("Only watch request, ignore it %s", key)

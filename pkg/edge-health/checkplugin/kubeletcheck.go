@@ -79,9 +79,10 @@ func (i *KubeletCheckPlugin) Type() string {
 
 func (plugin KubeletCheckPlugin) CheckExecute(wg *sync.WaitGroup) {
 	execwg := sync.WaitGroup{}
+	// 同步 checkinfoResult数目
 	execwg.Add(len(data.CheckInfoResult.CheckInfo))
 	for k := range data.CheckInfoResult.CopyCheckInfo() {
-		temp := k
+		temp := k // checked ip
 		go func(execwg *sync.WaitGroup) {
 			checkOk, err := ping(plugin.HealthCheckoutTimeOut, plugin.HealthCheckRetryTime, temp, plugin.Port)
 			if checkOk {
@@ -94,6 +95,7 @@ func (plugin KubeletCheckPlugin) CheckExecute(wg *sync.WaitGroup) {
 			execwg.Done()
 		}(&execwg)
 	}
+	// 阻塞
 	execwg.Wait()
 	wg.Done()
 }
@@ -103,13 +105,17 @@ func ping(timeout, retryTime int, checkedIp string, port int) (bool, error) {
 		err error
 		ok  bool
 	)
+	// 超时时间构建client
 	client := http.Client{Timeout: time.Duration(timeout) * time.Second}
+	// ping /healthz
 	url := "http://" + checkedIp + ":" + strconv.Itoa(port) + "/healthz"
 	klog.V(4).Infof("url is %s", url)
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
 		return false, fmt.Errorf("error new ping request: %w", err)
 	}
+
+	// 重试
 	for i := 0; i < retryTime; i++ {
 		if ok, err = PingDo(client, req); ok {
 			return true, nil

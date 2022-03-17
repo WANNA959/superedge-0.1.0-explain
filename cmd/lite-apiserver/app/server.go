@@ -61,6 +61,7 @@ func NewServerCommand() *cobra.Command {
 				return utilerrors.NewAggregate(errs)
 			}
 
+			// 起一个server
 			return Run(o, util.SetupSignalHandler())
 		},
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -73,12 +74,15 @@ func NewServerCommand() *cobra.Command {
 		},
 	}
 	fs := cmd.Flags()
+	// 解析flag参数并 赋值ServerRunOptions 实例o
 	namedFlagSets := o.Flags()
+	// 将namedFlagSets(TLSOptions+RunServerOptions)都合并到fs
 	for _, f := range namedFlagSets.FlagSets {
 		fs.AddFlagSet(f)
 	}
 
 	usageFmt := "Usage:\n  %s\n"
+	// 返回terminal width+height
 	cols, _, _ := TerminalSize(cmd.OutOrStdout())
 	cmd.SetUsageFunc(func(cmd *cobra.Command) error {
 		fmt.Fprintf(cmd.OutOrStderr(), usageFmt, cmd.UseLine())
@@ -102,6 +106,7 @@ func Run(serverOptions *options.ServerRunOptions, stopCh <-chan struct{}) error 
 		return err
 	}
 
+	// 初始化一个LiteServer对象，run
 	return server.Run()
 }
 

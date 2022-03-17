@@ -100,6 +100,7 @@ func NewEdgeReverseProxy(r *http.Request, manager *cert.CertManager, backendUrl 
 			}
 		}
 	}
+	// certManager map + commonName找到transport
 	p.transport = p.newTransport()
 
 	// set timeout for request, if overtime, we think request failed, and read cache
@@ -110,10 +111,13 @@ func NewEdgeReverseProxy(r *http.Request, manager *cert.CertManager, backendUrl 
 	}
 
 	reverseProxy := &httputil.ReverseProxy{
-		Director:       p.makeDirector,
-		Transport:      p.transport,
+		// 修改request的函数 https+backendUrl+port
+		Director:  p.makeDirector,
+		Transport: p.transport,
+		// 修改response的函数，如果需要写cache，则将response构建NewEdgeResponseDataHolder写入cache
 		ModifyResponse: p.modifyResponse,
-		ErrorHandler:   p.handlerError,
+		// 处理到达backend or ModifyResponse中返回的错误（此处不存在
+		ErrorHandler: p.handlerError,
 	}
 
 	reverseProxy.FlushInterval = -1
@@ -192,6 +196,7 @@ func (p *EdgeReverseProxy) handlerError(rw http.ResponseWriter, req *http.Reques
 	klog.V(4).Infof("Request error, need read data from cache")
 
 	// read cache when request error
+	// 从cache中构建一个response返回
 	data, cacheErr := p.readCache()
 	if cacheErr != nil {
 		klog.Errorf("Read cache error %v, write though error", cacheErr)
@@ -278,6 +283,11 @@ func (p *EdgeReverseProxy) writeCache(r *EdgeResponseDataHolder) {
 	if err != nil {
 		klog.Errorf("Write cache marshal %s error: %v", p.key(), err)
 	}
+	/*
+		写缓存
+		key=fmt.Sprintf("%s_%s", p.userAgent, p.urlString), "/", "_"
+		value为EdgeResponseDataHolder的序列化byte
+	*/
 	err = p.storage.Store(p.key(), bodyBytes)
 	if err != nil {
 		klog.Errorf("Write cache %s error: %v", p.key(), err)
@@ -287,6 +297,10 @@ func (p *EdgeReverseProxy) writeCache(r *EdgeResponseDataHolder) {
 func getRequestProperties(r *http.Request) (isList bool, isWatch bool, needCache bool) {
 	info, ok := apirequest.RequestInfoFrom(r.Context())
 	if ok {
+		/*
+			verb是与API请求关联的kube verb，而不是http动词。这包括list和watch。
+			对于非资源请求，为小写http verb（get、post...
+		*/
 		isList = info.Verb == VerbList
 		isWatch = info.Verb == VerbWatch
 
