@@ -30,6 +30,7 @@ func GetCABundle(certFile string) ([]byte, error) {
 }
 
 func TaintSetDiff(t1, t2 []v1.Taint) (taintsToAdd []v1.Taint, taintsToRemove []*v1.Taint) {
+	// t1有，t2没有，该taint删除
 	for _, taint := range t1 {
 		if !TaintExists(t2, &taint) {
 			t := taint
@@ -37,6 +38,7 @@ func TaintSetDiff(t1, t2 []v1.Taint) (taintsToAdd []v1.Taint, taintsToRemove []*
 		}
 	}
 
+	// t2有，t1没有，该taint添加
 	for _, taint := range t2 {
 		if !TaintExists(t1, &taint) {
 			t := taint
@@ -72,6 +74,7 @@ func GetNodeCondition(status *v1.NodeStatus, conditionType v1.NodeConditionType)
 	if status == nil {
 		return -1, nil
 	}
+	// Conditions is an array of current observed node conditions.
 	for i := range status.Conditions {
 		if status.Conditions[i].Type == conditionType {
 			return i, &status.Conditions[i]

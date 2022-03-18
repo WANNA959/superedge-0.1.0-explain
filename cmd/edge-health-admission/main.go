@@ -47,13 +47,16 @@ func main() {
 	klog.Infof("Versions: %#v\n", version.Get())
 
 	klog.V(4).Infof("master url is %s", Certconfig.MasterUrl)
+
 	config.Kubeclient = generateClientset(Certconfig.MasterUrl, Certconfig.KubeconfigPath)
 
+	// listen 两个path
 	http.HandleFunc("/node-taint", admission.NodeTaint)
 	http.HandleFunc("/endpoint", admission.EndPoint)
 	server := &http.Server{
 		Addr: admissionControlListenAddr,
 	}
+	// listen https
 	err := server.ListenAndServeTLS(Certconfig.CertFile, Certconfig.KeyFile)
 	if err != nil {
 		time.Sleep(time.Duration(10) * time.Second)
@@ -61,6 +64,7 @@ func main() {
 	}
 }
 
+// 根据masterUrl+kubeconfigPath 构建一个 kubernetes.Clientset
 func generateClientset(masterUrl, kubeconfigPath string) *kubernetes.Clientset {
 	var err error
 	kubeconfig, err := clientcmd.BuildConfigFromFlags(masterUrl, kubeconfigPath)

@@ -54,20 +54,28 @@ func endPoint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 
 	patches := []*Patch{}
 
+	// Endpoints is a collection of endpoints that implement the actual service. Example:
+
+	// todo ...?
 	for i1, EndpointSubset := range endpointNew.Subsets {
+		// IP addresses which offer the related ports but are not currently marked as ready
 		if len(EndpointSubset.NotReadyAddresses) != 0 {
 			for i2, EndpointAddress := range EndpointSubset.NotReadyAddresses {
+				// Node hosting this endpoint.
 				if node, err := config.Kubeclient.CoreV1().Nodes().Get(context.TODO(), *EndpointAddress.NodeName, metav1.GetOptions{}); err != nil {
 					klog.Errorf("can't get pod's node err: %v", err)
 				} else {
 					_, condition := util.GetNodeCondition(&node.Status, v1.NodeReady)
+					// 不含nodeunhealth annotation & condition.Status == v1.ConditionUnknown
 					if _, ok := node.Annotations["nodeunhealth"]; !ok && condition.Status == v1.ConditionUnknown {
 
+						// 删除
 						patches = append(patches, &Patch{
 							OP:   "remove",
 							Path: fmt.Sprintf("/subsets/%d/notReadyAddresses/%d", i1, i2),
 						})
 
+						// 添加
 						TargetRef := map[string]interface{}{}
 						TargetRef["kind"] = EndpointAddress.TargetRef.Kind
 						TargetRef["namespace"] = EndpointAddress.TargetRef.Namespace
@@ -99,6 +107,7 @@ func endPoint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			}
 		}
 	}
+	// Allowed indicates whether or not the admission request was permitted.
 	reviewResponse.Allowed = true
 	return &reviewResponse
 }

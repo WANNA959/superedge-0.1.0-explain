@@ -92,6 +92,7 @@ func (d EdgeDaemon) Run(ctx context.Context) {
 	// init commun
 	commun := communicate.NewCommunicateEdge(d.CommunicatePeriod, d.CommunicateTimeout, d.CommunicateRetryTime, d.CommunicateServerPort)
 	//TODO: Template pattern
+
 	wg.Add(1)
 
 	// 起一个commun server监听 /result
