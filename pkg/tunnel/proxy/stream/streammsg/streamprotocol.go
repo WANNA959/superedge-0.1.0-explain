@@ -24,6 +24,7 @@ import (
 )
 
 func HeartbeatHandler(msg *proto.StreamMsg) error {
+	// 根据edge node名称获取node
 	node := context.GetContext().GetNode(msg.Node)
 	if node == nil {
 		klog.Errorf("failed to send heartbeat to edge node node: %s", msg.Node)

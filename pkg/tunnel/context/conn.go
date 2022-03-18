@@ -19,17 +19,20 @@ package context
 import "superedge/pkg/tunnel/proto"
 
 type conn struct {
-	uid      string
-	ch       chan *proto.StreamMsg
+	uid string
+	ch  chan *proto.StreamMsg
 }
 
+// 向conn channel中添加msg
 func (c *conn) Send2Conn(msg *proto.StreamMsg) {
 	c.ch <- msg
 }
 
+// 两个get方法
 func (c *conn) ConnRecv() <-chan *proto.StreamMsg {
 	return c.ch
 }
+
 func (c *conn) GetUid() string {
 	return c.uid
 }

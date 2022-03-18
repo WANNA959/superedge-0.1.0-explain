@@ -22,10 +22,16 @@ import (
 )
 
 type protocolContext struct {
+	// module name-key-callback
 	protocols    map[string]map[string]CallBack
 	protocolLock sync.RWMutex
 }
 
+/*
+实现ModuleMng接口
+*/
+
+// protocols malloc module map[string]CallBack{}
 func (ctx *protocolContext) AddModule(module string) {
 	defer ctx.protocolLock.Unlock()
 	ctx.protocolLock.Lock()
@@ -36,15 +42,23 @@ func (ctx *protocolContext) AddModule(module string) {
 	ctx.protocols[module] = map[string]CallBack{}
 }
 
+// 按照module name删除protocals中对应的map
 func (ctx *protocolContext) RemoveModule(module string) {
 	defer ctx.protocolLock.Unlock()
 	ctx.protocolLock.Lock()
 	delete(ctx.protocols, module)
 }
 
+/*
+实现Protocol接口
+*/
+
+// 根据module+key获取对应的callback handler
 func (ctx *protocolContext) GetHandler(key, module string) CallBack {
 	defer ctx.protocolLock.RUnlock()
 	ctx.protocolLock.RLock()
+
+	// pre-check
 	if ctx.protocols == nil {
 		klog.Error("protocolcontext is not initialized!")
 		return nil
@@ -54,6 +68,8 @@ func (ctx *protocolContext) GetHandler(key, module string) CallBack {
 		klog.Errorf("module %s is not loaded", module)
 		return nil
 	}
+
+	// 根据module+key获取对应的callback handler
 	f, fok := ctx.protocols[module][key]
 	if !fok {
 		klog.Errorf("module %s is not registered handler %s !", module, key)
@@ -62,6 +78,8 @@ func (ctx *protocolContext) GetHandler(key, module string) CallBack {
 	return f
 }
 
+// set handler————write protocols map:  module name-key-callback
+// 某个module下某个key对应的callback handler
 func (ctx *protocolContext) RegisterHandler(key, module string, handler CallBack) {
 	defer ctx.protocolLock.Unlock()
 	ctx.protocolLock.Lock()

@@ -12,6 +12,7 @@ message StreamMsg {
 }
 
 service Stream {
+    // 双向流
     rpc TunnelStreaming (stream StreamMsg) returns (stream StreamMsg) {
     }
 }

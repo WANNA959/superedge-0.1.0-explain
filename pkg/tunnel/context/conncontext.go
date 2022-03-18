@@ -22,10 +22,15 @@ import (
 	"sync"
 )
 
+// conn map
 type connContext struct {
 	conns    map[string]*conn
 	connLock sync.RWMutex
 }
+
+/*
+	同node context CURD
+*/
 
 func (entity *connContext) AddConn(uid string) *conn {
 	entity.connLock.Lock()

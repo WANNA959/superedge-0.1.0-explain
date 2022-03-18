@@ -16,6 +16,7 @@ limitations under the License.
 
 package model
 
+// 三个module实现了这三个方法
 type Module interface {
 	Name() string
 	Start(mode string)

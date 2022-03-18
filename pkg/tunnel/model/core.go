@@ -17,16 +17,18 @@ limitations under the License.
 package model
 
 import (
-	"superedge/pkg/tunnel/context"
 	"k8s.io/klog"
 	"os"
 	"os/signal"
+	"superedge/pkg/tunnel/context"
 	"syscall"
 )
 
+// 一共register了三个module（stream tcp https
 func LoadModules(mode string) {
 	modules := GetModules()
 	for n, m := range modules {
+		// malloc CallBack：ctx.protocols[module] = map[string]CallBack{}
 		context.GetContext().AddModule(n)
 		klog.Infof("starting module:%s", m.Name())
 		m.Start(mode)
@@ -35,6 +37,7 @@ func LoadModules(mode string) {
 
 }
 
+// 增加signal处理函数，几个module优雅退出
 func ShutDown() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGILL, syscall.SIGTRAP, syscall.SIGABRT)

@@ -20,11 +20,6 @@ import "superedge/pkg/tunnel/proto"
 
 type CallBack func(msg *proto.StreamMsg) error
 
-type Protocol interface {
-	GetHandler(key, module string) CallBack
-	RegisterHandler(key, module string, handler CallBack)
-}
-
 type Conn interface {
 	Send2Conn(msg *proto.StreamMsg)
 	ConnRecv() <-chan *proto.StreamMsg
@@ -53,6 +48,12 @@ type NodeMng interface {
 	RemoveNode(node string)
 	GetNodes() []string
 	NodeIsExist(node string) bool
+}
+
+// ProtocolContext(Protocol+ModuleMng
+type Protocol interface {
+	GetHandler(key, module string) CallBack
+	RegisterHandler(key, module string, handler CallBack)
 }
 
 type ModuleMng interface {

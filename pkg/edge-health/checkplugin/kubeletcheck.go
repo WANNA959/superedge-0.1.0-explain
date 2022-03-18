@@ -36,6 +36,7 @@ func (p KubeletCheckPlugin) Name() string {
 	return "KubeletCheck"
 }
 
+// todo plugin set call？
 func (p *KubeletCheckPlugin) Set(s string) error {
 	var (
 		err error

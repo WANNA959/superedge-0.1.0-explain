@@ -50,6 +50,7 @@ var kasp = keepalive.ServerParameters{
 	Timeout:               1 * time.Second,
 }
 
+// start a GPRC server
 func StartServer() {
 	creds, err := credentials.NewServerTLSFromFile(conf.TunnelConf.TunnlMode.Cloud.Stream.Server.Cert, conf.TunnelConf.TunnlMode.Cloud.Stream.Server.Key)
 	if err != nil {
@@ -57,15 +58,19 @@ func StartServer() {
 		return
 	}
 	opts := []grpc.ServerOption{grpc.KeepaliveEnforcementPolicy(kaep), grpc.KeepaliveParams(kasp), grpc.StreamInterceptor(ServerStreamInterceptor), grpc.Creds(creds)}
+	// build a gRPC server
 	s := grpc.NewServer(opts...)
+	// register（grpc自动生成
 	proto.RegisterStreamServer(s, &stream.Server{})
 
+	// the cloud tunnel listener
 	lis, err := net.Listen("tcp", "0.0.0.0:"+strconv.Itoa(conf.TunnelConf.TunnlMode.Cloud.Stream.Server.GrpcPort))
 	klog.Infof("the https server of the cloud tunnel  listen on %s", "0.0.0.0:"+strconv.Itoa(conf.TunnelConf.TunnlMode.Cloud.Stream.Server.GrpcPort))
 	if err != nil {
 		klog.Fatalf("failed to listen: %v", err)
 		return
 	}
+	// server serve
 	if err := s.Serve(lis); err != nil {
 		klog.Fatalf("failed to serve: %v", err)
 		return

@@ -17,6 +17,8 @@ limitations under the License.
 package app
 
 import (
+	"github.com/spf13/cobra"
+	"k8s.io/klog"
 	"superedge/cmd/tunnel/app/options"
 	"superedge/pkg/tunnel/conf"
 	. "superedge/pkg/tunnel/model"
@@ -26,11 +28,10 @@ import (
 	"superedge/pkg/util"
 	"superedge/pkg/version"
 	"superedge/pkg/version/verflag"
-	"github.com/spf13/cobra"
-	"k8s.io/klog"
 )
 
 func NewTunnelCommand() *cobra.Command {
+	// init TunnelOption
 	option := options.NewTunnelOption()
 	cmd := &cobra.Command{
 		Use: "tunnel",
@@ -45,10 +46,19 @@ func NewTunnelCommand() *cobra.Command {
 				klog.Info("tunnel failed to load configuration file !")
 				return
 			}
+
+			// malloc map
 			InitModules(*option.TunnelMode)
+
+			// init token & register stream module
 			stream.InitStream(*option.TunnelMode)
+
+			// register tcp module
 			tcp.InitTcp()
+
+			// register https module
 			https.InitHttps()
+
 			LoadModules(*option.TunnelMode)
 			ShutDown()
 		},

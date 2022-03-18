@@ -46,6 +46,7 @@ func InitDNS() error {
 	coreDns = &CoreDns{
 		Update: make(chan struct{}),
 	}
+	// 从环境变量读取tunnel-cloud pod ip信息
 	coreDns.PodIp = os.Getenv(util.POD_IP_ENV)
 	klog.Infof("endpoint of the proxycloud pod = %s ", coreDns.PodIp)
 	config, err := rest.InClusterConfig()
@@ -59,6 +60,7 @@ func InitDNS() error {
 		return err
 	}
 	coreDns.ClientSet = clientset
+	// 从环境变量读取tunnel-cloud namespace信息
 	coreDns.Namespace = os.Getenv(util.POD_NAMESPACE_ENV)
 	return nil
 }
@@ -106,6 +108,7 @@ func SynCorefile() {
 }
 
 func parseHosts() (map[string]string, bool) {
+	// 从文件读hosts
 	file, err := os.Open(conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Hosts)
 	if err != nil {
 		klog.Errorf("load hosts fail! err = %v", err)

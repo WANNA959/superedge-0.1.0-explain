@@ -43,6 +43,7 @@ type Token struct {
 	Token    string `json:"token"`
 }
 
+// 通过nodename找到tokenData（找不到default
 func GetTokenFromCache(nodeName string) string {
 	defer tokenData.Lock.RUnlock()
 	tokenData.Lock.RLock()
@@ -58,11 +59,14 @@ func InitTokenCache(file string) error {
 		Tokens: nil,
 		Lock:   sync.RWMutex{},
 	}
+
+	// init tokenData
 	err := GetTokenFromFile(file)
 	if err != nil {
 		klog.Error("failed to read client token from file")
 		return err
 	}
+	// 起一个goroutine，以10s为周期：renew tokenData（如果err return
 	go func() {
 		stop := make(chan struct{}, 1)
 		for {
@@ -81,6 +85,7 @@ func InitTokenCache(file string) error {
 	return nil
 }
 
+// token struct转换为string形式（via byte
 func GetTonken(nodeName, token string) (string, error) {
 	ttoken := &Token{
 		NodeName: nodeName,
@@ -102,6 +107,8 @@ func GetTokenFromFile(path string) error {
 		return err
 	}
 	defer f.Close()
+
+	// 按行读取，解析k:v 键值对数据
 	tokenMap := make(map[string]string)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -113,6 +120,7 @@ func GetTokenFromFile(path string) error {
 	return nil
 }
 
+// 反序列化 byte → token struct（nodename+token）
 func ParseToken(token string) (*Token, error) {
 	rtoken := &Token{}
 	err := json.Unmarshal([]byte(token), rtoken)
@@ -122,7 +130,9 @@ func ParseToken(token string) (*Token, error) {
 	return rtoken, nil
 }
 
+// 解析单行k:v键值对
 func ParseLine(line string, m map[string]string) {
+	// 删除string中的空格和换行符
 	line = util.ReplaceString(line)
 	kv := strings.Split(line, ":")
 	m[kv[0]] = kv[1]

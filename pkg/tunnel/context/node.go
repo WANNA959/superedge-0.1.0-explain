@@ -28,6 +28,7 @@ type node struct {
 	connsLock sync.RWMutex
 }
 
+// init conns
 func (edge *node) BindNode(uuid string) {
 	edge.connsLock.Lock()
 	if edge.conns == nil {
@@ -36,6 +37,7 @@ func (edge *node) BindNode(uuid string) {
 	edge.connsLock.Unlock()
 }
 
+// 从node conns中移除某个uuid
 func (edge *node) UnbindNode(uuid string) {
 	edge.connsLock.Lock()
 	for k, v := range *edge.conns {
@@ -46,10 +48,12 @@ func (edge *node) UnbindNode(uuid string) {
 	edge.connsLock.Unlock()
 }
 
+// msg添加到node channel中
 func (edge *node) Send2Node(msg *proto.StreamMsg) {
 	edge.ch <- msg
 }
 
+// get ch
 func (edge *node) NodeRecv() <-chan *proto.StreamMsg {
 	return edge.ch
 }
@@ -58,6 +62,7 @@ func (edge *node) GetName() string {
 	return edge.name
 }
 
+// get all conns
 func (edge *node) GetBindConns() []string {
 	edge.connsLock.RLock()
 	defer edge.connsLock.RUnlock()

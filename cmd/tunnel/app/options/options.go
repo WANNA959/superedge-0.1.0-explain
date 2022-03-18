@@ -27,6 +27,7 @@ type TunnelOption struct {
 }
 
 func NewTunnelOption() *TunnelOption {
+	// default
 	c := "../../conf/cloud_mode.toml"
 	m := "cloud"
 	d := false

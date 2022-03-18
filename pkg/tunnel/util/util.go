@@ -18,6 +18,7 @@ package util
 
 import "strings"
 
+// 删除string中的空格和换行符
 func ReplaceString(line string) string {
 	line = strings.Replace(line, " ", "", -1)
 	line = strings.Replace(line, "\n", "", -1)

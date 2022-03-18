@@ -17,6 +17,8 @@ limitations under the License.
 package stream
 
 import (
+	"k8s.io/klog"
+	"os"
 	"superedge/pkg/tunnel/conf"
 	"superedge/pkg/tunnel/context"
 	"superedge/pkg/tunnel/model"
@@ -24,21 +26,22 @@ import (
 	"superedge/pkg/tunnel/proxy/stream/streammsg"
 	"superedge/pkg/tunnel/token"
 	"superedge/pkg/tunnel/util"
-	"k8s.io/klog"
-	"os"
 )
 
 type Stream struct {
 }
 
+// 实现Module接口的三个方法
 func (stream *Stream) Name() string {
 	return util.STREAM
 }
 
 func (stream *Stream) Start(mode string) {
+	// protocolContext protocols中添加对应的module-key-handler
 	context.GetContext().RegisterHandler(util.STREAM_HEART_BEAT, util.STREAM, streammsg.HeartbeatHandler)
 	var channelzAddr string
 	if mode == util.CLOUD {
+		// cloud端启动一个gRPC server
 		go connect.StartServer()
 		if !conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Debug {
 			go connect.SynCorefile()
@@ -59,25 +62,32 @@ func (stream *Stream) CleanUp() {
 }
 
 func InitStream(mode string) {
+	// cloud端
 	if mode == util.CLOUD {
 		if !conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Debug {
+			// init stream coredns
 			err := connect.InitDNS()
 			if err != nil {
 				klog.Errorf("init client-go fail err = %v", err)
 				return
 			}
 		}
+
+		// init tokenData
 		err := token.InitTokenCache(conf.TunnelConf.TunnlMode.Cloud.Stream.Server.TokenFile)
 		if err != nil {
 			klog.Error("Error loading token file ！")
 		}
 	} else {
+		// edge端
+		// 根据edge node name环境变量，init clientToken（nodename+client） string
 		err := connect.InitToken(os.Getenv(util.NODE_NAME_ENV), conf.TunnelConf.TunnlMode.EDGE.StreamEdge.Client.Token)
 		if err != nil {
 			klog.Errorf("initialize the edge node token err = %v", err)
 			return
 		}
 	}
+	// Modules[STREAM] = m
 	model.Register(&Stream{})
 	klog.Infof("init module: %s success !", util.STREAM)
 }

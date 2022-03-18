@@ -22,11 +22,13 @@ import (
 	"sync"
 )
 
+// node map
 type nodeContext struct {
 	nodes    map[string]*node
 	nodeLock sync.RWMutex
 }
 
+// nodes map添加一个node
 func (entity *nodeContext) AddNode(name string) *node {
 	entity.nodeLock.Lock()
 	defer entity.nodeLock.Unlock()
@@ -39,18 +41,21 @@ func (entity *nodeContext) AddNode(name string) *node {
 	return edge
 }
 
+// 按name获取node struct
 func (entity *nodeContext) GetNode(name string) *node {
 	entity.nodeLock.Lock()
 	defer entity.nodeLock.Unlock()
 	return entity.nodes[name]
 }
 
+// 按name删除node struct
 func (entity *nodeContext) RemoveNode(name string) {
 	entity.nodeLock.Lock()
 	defer entity.nodeLock.Unlock()
 	delete(entity.nodes, name)
 }
 
+// get all nodes' name
 func (entity *nodeContext) GetNodes() []string {
 	entity.nodeLock.RLock()
 	defer entity.nodeLock.RUnlock()
@@ -60,6 +65,8 @@ func (entity *nodeContext) GetNodes() []string {
 	}
 	return nodes
 }
+
+// 按name判断某个node是否在nodes中
 func (entity *nodeContext) NodeIsExist(node string) bool {
 	entity.nodeLock.RLock()
 	defer entity.nodeLock.RUnlock()
