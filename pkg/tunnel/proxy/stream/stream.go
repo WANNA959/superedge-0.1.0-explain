@@ -31,7 +31,10 @@ import (
 type Stream struct {
 }
 
-// 实现Module接口的三个方法
+/*
+实现Module接口的三个方法
+*/
+
 func (stream *Stream) Name() string {
 	return util.STREAM
 }
@@ -44,16 +47,21 @@ func (stream *Stream) Start(mode string) {
 		// cloud端启动一个gRPC server
 		go connect.StartServer()
 		if !conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Debug {
+			// todo 同步coredns的hosts插件的配置文件
 			go connect.SynCorefile()
 		}
 		channelzAddr = conf.TunnelConf.TunnlMode.Cloud.Stream.Server.ChannelzAddr
 	} else {
+		// edge端
+		// 启动gRPC client：init streamConn(clientConn)不断sendMsg & recvMsg
 		go connect.StartSendClient()
 		channelzAddr = conf.TunnelConf.TunnlMode.EDGE.StreamEdge.Client.ChannelzAddr
 	}
 
+	// 起一个goroutine run log server
 	go connect.StartLogServer(mode)
 
+	// 起一个goroutine run channel server
 	go connect.StartChannelzServer(channelzAddr)
 }
 

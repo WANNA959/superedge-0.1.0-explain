@@ -77,12 +77,18 @@ func StartServer() {
 	}
 }
 
+/*
+起一个log server
+handleFunc /debug/flags/v
+暴露get /healthz
+*/
 func StartLogServer(mode string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/flags/v", util.UpdateLogLevel)
 	ser := &http.Server{
 		Handler: mux,
 	}
+	// 对cloud/edge端，暴露/healthz健康监测url，接收get请求（默认端口cloud8000 edge7000
 	if mode == tunnel.CLOUD {
 		mux.HandleFunc("/cloud/healthz", func(writer http.ResponseWriter, request *http.Request) {
 			if request.Method == http.MethodGet {
@@ -104,6 +110,10 @@ func StartLogServer(mode string) {
 	}
 }
 
+/*
+gRPC 提供了 Channelz 用于对外提供服务的数据，用于调试、监控等
+默认端口 cloud6000 edge5000
+*/
 func StartChannelzServer(addr string) {
 	if addr == "" {
 		klog.Info("channelz server listening address is not configured")

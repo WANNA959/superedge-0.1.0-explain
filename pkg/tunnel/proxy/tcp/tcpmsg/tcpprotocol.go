@@ -26,6 +26,7 @@ import (
 	"superedge/pkg/tunnel/util"
 )
 
+// add StreamMsg to conn channel
 func BackendHandler(msg *proto.StreamMsg) error {
 	conn := context.GetContext().GetConn(msg.Topic)
 	if conn == nil {
@@ -36,6 +37,9 @@ func BackendHandler(msg *proto.StreamMsg) error {
 	return nil
 }
 
+//FrontendHandler 首先使用 StreamMsg.Addr 与 Edge Server 建立 TCP 连接，启动协程异步对 TCP 连接 Read 和 Write，
+//同时新建 conn 对象(conn.uid=StreamMsg.Topic)，并 eamMsg.Data 写入 TCP 连接。
+//tunnel-edge 在接收到 Edge Server 的返回数据将其封装为 StreamMsg(StreamMsg.Topic=BackendHandler) 发送到 tunnel-cloud
 func FrontendHandler(msg *proto.StreamMsg) error {
 	c := context.GetContext().GetConn(msg.Topic)
 	if c != nil {

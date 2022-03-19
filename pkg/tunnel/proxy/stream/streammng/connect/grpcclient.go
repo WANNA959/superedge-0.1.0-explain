@@ -42,18 +42,23 @@ var kacp = keepalive.ClientParameters{
 
 var streamConn *grpc.ClientConn
 
+// edge node 调用 StartClient 与 tunnel-edge 建立 gRPC 连接，返回 grpc.ClientConn
 func StartClient() (*grpc.ClientConn, ctx.Context, ctx.CancelFunc, error) {
+	// localhost as client
 	creds, err := credentials.NewClientTLSFromFile(conf.TunnelConf.TunnlMode.EDGE.StreamEdge.Client.Cert, conf.TunnelConf.TunnlMode.EDGE.StreamEdge.Client.Dns)
 	if err != nil {
 		klog.Errorf("failed to load credentials: %v", err)
 		return nil, nil, nil, err
 	}
+	// 注意此处的interceptor
 	opts := []grpc.DialOption{grpc.WithKeepaliveParams(kacp), grpc.WithStreamInterceptor(ClientStreamInterceptor), grpc.WithTransportCredentials(creds)}
 	conn, err := grpc.Dial(conf.TunnelConf.TunnlMode.EDGE.StreamEdge.Client.ServerName, opts...)
 	if err != nil {
 		klog.Error("edge start client fail !")
 		return nil, nil, nil, err
 	}
+	// 永不超时
+	// A CancelFunc tells an operation to abandon its work.
 	clictx, cancle := ctx.WithTimeout(ctx.Background(), time.Duration(math.MaxInt64))
 	return conn, clictx, cancle, nil
 }
@@ -67,19 +72,25 @@ func StartSendClient() {
 	}
 	streamConn = conn
 	defer func() {
+		// 关闭连接
 		conn.Close()
 		cancle()
 	}()
 
+	// todo 两个for{}区别？
+
+	// 起一个goroutine监控clientConn连接情况，如果not ready超过3min exit
 	go func(monitor *grpc.ClientConn) {
 		mcount := 0
 		for {
+			//Ready indicates the ClientConn is ready for work.
 			if conn.GetState() == connectivity.Ready {
 				mcount = 0
 			} else {
 				mcount += 1
 			}
 			klog.V(8).Infof("grpc connection status = %s count = %v", conn.GetState(), mcount)
+			// grpc connection 3min timeout: exit
 			if mcount >= util.TIMEOUT_EXIT {
 				klog.Error("grpc connection rebuild timed out, container exited !")
 				klog.Flush()
@@ -91,15 +102,20 @@ func StartSendClient() {
 	}(conn)
 	running := true
 	count := 0
+	// running...why?
+	// 死循环
 	for running {
 		if conn.GetState() == connectivity.Ready {
+			//
 			cli := proto.NewStreamClient(conn)
+			// stream client send
 			stream.Send(cli, clictx)
 			count = 0
 		}
 		count += 1
 		klog.V(8).Infof("node connection status = %s count = %v", conn.GetState(), count)
 		time.Sleep(1 * time.Second)
+		//clientConn连接情况，如果not ready超过3min exit
 		if count >= util.TIMEOUT_EXIT {
 			klog.Error("the streamClient retrying to establish a connection timed out and the container exited !")
 			klog.Flush()

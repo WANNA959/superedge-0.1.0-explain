@@ -17,12 +17,12 @@ limitations under the License.
 package tcpmng
 
 import (
-	"superedge/pkg/tunnel/context"
-	"superedge/pkg/tunnel/proto"
-	"superedge/pkg/tunnel/util"
 	"io"
 	"k8s.io/klog"
 	"net"
+	"superedge/pkg/tunnel/context"
+	"superedge/pkg/tunnel/proto"
+	"superedge/pkg/tunnel/util"
 	"sync"
 )
 
@@ -117,6 +117,8 @@ func (tcp *TcpConn) Read() {
 func (tcp *TcpConn) cleanUp() {
 	tcp.stopChan <- struct{}{}
 }
+
+// node channel发送msg
 func (tcp *TcpConn) closeOpposite() {
 	tcp.once.Do(func() {
 		tcp.n.Send2Node(&proto.StreamMsg{
@@ -126,6 +128,7 @@ func (tcp *TcpConn) closeOpposite() {
 			Data:     []byte{},
 			Addr:     tcp.Addr,
 		})
+		// 移除node上的某个conn
 		tcp.n.UnbindNode(tcp.uid)
 
 		context.GetContext().RemoveConn(tcp.uid)

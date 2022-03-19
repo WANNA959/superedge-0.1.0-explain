@@ -30,6 +30,10 @@ import (
 	"superedge/pkg/tunnel/util"
 )
 
+//Reqeust 首先通过 getHttpConn 与边缘节点 Server 建立的 TLS 连接。
+//解析 TLS 连接中返回的数据获取 HTTP Response，Status Code 为200，
+//将 Response 的内容发送到 tunnel-cloud，Status Code 为101，
+//将从TLS 连接读取 Response 的二进制数据发送到 tunnel-cloud，其中 StreamMsg.Type为CONNECTED（tunnel-cloud 在接受到该 StreamMsg 后，会调用 ConnectedAndTransmission 进行处理）。
 func Request(msg *proto.StreamMsg) {
 	httpConn, err := getHttpConn(msg)
 	if err != nil {
@@ -81,6 +85,8 @@ func Request(msg *proto.StreamMsg) {
 			confirm = false
 		}
 	}
+	//云端 HTTPS Server 在接受到云端的 CONNECTED 消息之后，认为HTTPS 代理成功建立。
+	//并继续执行 handleClientHttp or handleClientSwitchingProtocols 进行数据传输
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		handleClientHttp(resp, rawResponse, httpConn, msg, node, conn)
 	} else {
@@ -123,6 +129,10 @@ func getHttpConn(msg *proto.StreamMsg) (net.Conn, error) {
 	return conn, nil
 }
 
+// handleClientHttp 会一直尝试读取来自边端组件的数据包，
+//并构建成 TRANSNMISSION 类型的 StreamMsg 发送给 tunnel-cloud，
+//tunnel-cloud 在接受到StreamMsg 后调用 ConnectedAndTransmission 函数，
+//将 StreamMsg 放入 StreamMsg.Type 对应的 HTTPS 模块的 conn.Channel 中
 func handleClientHttp(resp *http.Response, rawResponse *bytes.Buffer, httpConn net.Conn, msg *proto.StreamMsg, node context.Node, conn context.Conn) {
 	readCh := make(chan *proto.StreamMsg, util.MSG_CHANNEL_CAP)
 	stop := make(chan struct{})

@@ -17,15 +17,15 @@ limitations under the License.
 package tcp
 
 import (
+	uuid "github.com/satori/go.uuid"
+	"k8s.io/klog"
+	"net"
 	"superedge/pkg/tunnel/conf"
 	"superedge/pkg/tunnel/context"
 	"superedge/pkg/tunnel/model"
 	"superedge/pkg/tunnel/proxy/tcp/tcpmng"
 	"superedge/pkg/tunnel/proxy/tcp/tcpmsg"
 	"superedge/pkg/tunnel/util"
-	uuid "github.com/satori/go.uuid"
-	"k8s.io/klog"
-	"net"
 )
 
 type TcpProxy struct {
@@ -39,11 +39,19 @@ func (tcp *TcpProxy) Name() string {
 	return util.TCP
 }
 
+// 在多集群管理中建立云端管控集群与边缘独立集群的一条 TCP 代理隧道
 func (tcp *TcpProxy) Start(mode string) {
+	// 注册了 StreamMsg 的处理函数：register三个handler tcp: handeler name: handler
+	// CLOSED 处理函数主要处理关闭连接的消息
+	// 在接受到云端组件的请求后，TCP Server 会将请求封装成 StremMsg 发送给 StreamServer，
+	// 由 StreamServer 发送到 tunnel-edge,其中 StreamMsg.Type=FrontendHandler，
+	// StreamMsg.Node 从已建立的云边隧道的节点中随机选择一个。
+	// tunnel-edge 在接受到该StreamMsg 后，会调用 FrontendHandler 函数处理
 	context.GetContext().RegisterHandler(util.TCP_BACKEND, tcp.Name(), tcpmsg.BackendHandler)
 	context.GetContext().RegisterHandler(util.TCP_FRONTEND, tcp.Name(), tcpmsg.FrontendHandler)
 	context.GetContext().RegisterHandler(util.TCP_CONTROL, tcp.Name(), tcpmsg.ControlHandler)
 	if mode == util.CLOUD {
+		// "0.0.0.0:6443" = "127.0.0.1:6443"
 		for front, backend := range conf.TunnelConf.TunnlMode.Cloud.Tcp {
 			go func(front, backend string) {
 				ln, err := net.Listen("tcp", front)
@@ -67,6 +75,7 @@ func (tcp *TcpProxy) Start(mode string) {
 					}
 					uuid := uuid.NewV4().String()
 					node := nodes[0]
+					//在云端启动 TCP Server。
 					fp := tcpmng.NewTcpConn(uuid, backend, node)
 					fp.Conn = rawConn
 					fp.Type = util.TCP_FRONTEND

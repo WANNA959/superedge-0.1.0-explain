@@ -134,12 +134,16 @@ func (serverHandler *ServerHandler) ServeHTTP(writer http.ResponseWriter, reques
 		return
 	}
 	if rmsg.StatusCode != http.StatusSwitchingProtocols {
+		// 单向数据流动（edge 到 cloud
 		handleServerHttp(rmsg, writer, request, node, conn)
 	} else {
+		// 双向数据流动
 		handleServerSwitchingProtocols(writer, node, conn)
 	}
 }
 
+//handleServerHttp 在接受到 StreamMsg 后，会将 msg.Data，也即边端组件的数据包，发送给云端组件。
+//整个数据流是单向的由边端向云端传送
 func handleServerHttp(rmsg *HttpsMsg, writer http.ResponseWriter, request *http.Request, node context.Node, conn context.Conn) {
 	for k, v := range rmsg.Header {
 		writer.Header().Add(k, v)
@@ -176,6 +180,9 @@ func handleServerHttp(rmsg *HttpsMsg, writer http.ResponseWriter, request *http.
 	context.GetContext().RemoveConn(conn.GetUid())
 }
 
+//类似kubectl exec的请求，数据流是双向的，此时边端组件 (kubelet) 会返回 StatusCode 为101的回包，标示协议提升，
+//之后 tunnel-cloud 以及 tunnel-edge 会分别切到 handleServerSwitchingProtocols 以及 handleClientSwitchingProtocols
+//对 HTTPS 底层连接进行读取和写入，完成数据流的双向传输
 func handleServerSwitchingProtocols(writer http.ResponseWriter, node context.Node, conn context.Conn) {
 	requestHijacker, ok := writer.(http.Hijacker)
 	if !ok {

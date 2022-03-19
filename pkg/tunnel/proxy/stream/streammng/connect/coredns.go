@@ -65,6 +65,7 @@ func InitDNS() error {
 	return nil
 }
 
+// checkHosts 负责 configmap 具体的刷新操作
 func (dns *CoreDns) checkHosts() error {
 	nodes, flag := parseHosts()
 	if !flag {
@@ -96,6 +97,7 @@ func (dns *CoreDns) checkHosts() error {
 	return nil
 }
 
+// 每隔一分钟(考虑到 configmap 同步 tunnel-cloud 的 pod 挂载文件的时间)执行一次 checkHosts
 func SynCorefile() {
 	for {
 		klog.V(8).Infof("connected node total = %d nodes = %v", len(context.GetContext().GetNodes()), context.GetContext().GetNodes())
@@ -107,6 +109,10 @@ func SynCorefile() {
 	}
 }
 
+/*
+parseHosts 获取本地 hosts 文件中边缘节点名称以及对应 tunnel-cloud podIp 映射列表
+对比 podIp 的对应节点名和内存中节点名，如果有变化则将这个内容覆盖写入 configmap 并更新
+*/
 func parseHosts() (map[string]string, bool) {
 	// 从文件读hosts
 	file, err := os.Open(conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Hosts)
@@ -126,6 +132,7 @@ func parseHosts() (map[string]string, bool) {
 	update := false
 	for scanner.Scan() {
 		line := scanner.Bytes()
+		// 将按照空格分割成多个子切片
 		f := bytes.Fields(line)
 		if len(f) < 2 {
 			update = true

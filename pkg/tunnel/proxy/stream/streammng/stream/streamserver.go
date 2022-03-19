@@ -17,12 +17,16 @@ limitations under the License.
 package stream
 
 import (
-	"superedge/pkg/tunnel/proto"
 	"k8s.io/klog"
+	"superedge/pkg/tunnel/proto"
 )
 
 type Server struct{}
 
+/*
+并发调用 wrappedServerStream.SendMsg 以及 wrappedServerStream.RecvMsg
+分别用于 tunnel-cloud 发送以及接受，并阻塞等待：
+*/
 func (s *Server) TunnelStreaming(stream proto.Stream_TunnelStreamingServer) error {
 	errChan := make(chan error, 2)
 

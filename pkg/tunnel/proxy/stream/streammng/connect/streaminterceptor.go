@@ -41,6 +41,24 @@ var (
 )
 var clientToken string
 
+/*
+拦截器方法
+通过调用streamer 可以获得 ClientStream, 包装ClientStream 并重载他的 RecvMsg 和 SendMsg 方法，即可做一些拦截处理
+*/
+
+/*
+wrappedClientStream部分
+*/
+
+type wrappedClientStream struct {
+	grpc.ClientStream
+	restart bool
+}
+
+func newClientWrappedStream(s grpc.ClientStream) grpc.ClientStream {
+	return &wrappedClientStream{s, false}
+}
+
 func ClientStreamInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	var credsConfigured bool
 	for _, o := range opts {
@@ -49,6 +67,7 @@ func ClientStreamInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grp
 			credsConfigured = true
 		}
 	}
+	// 将边缘节点名称以及 token 构造成 oauth2.Token.AccessToken 进行认证传递
 	if !credsConfigured {
 		opts = append(opts, grpc.PerRPCCredentials(oauth.NewOauthAccess(&oauth2.Token{
 			AccessToken: clientToken,
@@ -61,40 +80,38 @@ func ClientStreamInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grp
 	return newClientWrappedStream(s), nil
 }
 
-func newClientWrappedStream(s grpc.ClientStream) grpc.ClientStream {
-	return &wrappedClientStream{s, false}
-}
-
-type wrappedClientStream struct {
-	grpc.ClientStream
-	restart bool
-}
-
 func (w *wrappedClientStream) SendMsg(m interface{}) error {
 	if m != nil {
 		return w.ClientStream.SendMsg(m)
 	}
+
 	nodeName := os.Getenv(util.NODE_NAME_ENV)
 	node := ctx.GetContext().AddNode(nodeName)
 	klog.Infof("node added successfully node = %s", nodeName)
 	stopHeartbeat := make(chan struct{}, 1)
+
 	defer func() {
 		stopHeartbeat <- struct{}{}
 		ctx.GetContext().RemoveNode(nodeName)
 		klog.Infof("node removed successfully node = %s", nodeName)
 	}()
+
+	// 一个goroutine 向node channel发送 StreamMsg（两种类型
 	go func(hnode ctx.Node, hw *wrappedClientStream, heartbeatStop chan struct{}) {
 		count := 0
 		for {
 			select {
+			// 1min周期内recv没有处理 or 有err产生，则close
 			case <-time.After(60 * time.Second):
 				if w.restart {
 					klog.Errorf("streamClient failed to receive heartbeat message count:%v", count)
+					// 连续两次restart=true
 					if count >= 1 {
 						klog.Error("streamClient receiving heartbeat timeout, container exits")
 						klog.Flush()
 						os.Exit(1)
 					}
+
 					hnode.Send2Node(&proto.StreamMsg{
 						Node:     os.Getenv(util.NODE_NAME_ENV),
 						Category: util.STREAM,
@@ -118,6 +135,8 @@ func (w *wrappedClientStream) SendMsg(m interface{}) error {
 			}
 		}
 	}(node, w, stopHeartbeat)
+
+	// 一个for 通过channel接收StreamMsg，直到 msg.type=closed
 	for {
 		msg := <-node.NodeRecv()
 		if msg.Category == util.STREAM && msg.Type == util.CLOSED {
@@ -125,6 +144,7 @@ func (w *wrappedClientStream) SendMsg(m interface{}) error {
 			return fmt.Errorf("streamClient stops sending messages to server node: %s", os.Getenv(util.NODE_NAME_ENV))
 		}
 		klog.V(8).Infof("streamClinet starts to send messages to the server node: %s uuid: %s", msg.Node, msg.Topic)
+		// 发送 STREAM_HEART_BEAT 类型 msg
 		err := w.ClientStream.SendMsg(msg)
 		if err != nil {
 			klog.Errorf("streamClient failed to send message err = %v", err)
@@ -141,6 +161,7 @@ func (w *wrappedClientStream) RecvMsg(m interface{}) error {
 	for {
 		msg := &proto.StreamMsg{}
 		err := w.ClientStream.RecvMsg(msg)
+		// 有err产生，则close
 		if err != nil {
 			klog.Error("streamClient failed to receive message")
 			node := ctx.GetContext().GetNode(os.Getenv(util.NODE_NAME_ENV))
@@ -154,14 +175,26 @@ func (w *wrappedClientStream) RecvMsg(m interface{}) error {
 			return err
 		}
 		klog.V(8).Infof("streamClient recv msg node: %s uuid: %s", msg.Node, msg.Topic)
+		// 接收到msg类型为 STREAM_HEART_BEAT
 		if msg.Category == util.STREAM && msg.Type == util.STREAM_HEART_BEAT {
 			klog.V(8).Info("streamClient received heartbeat message")
+			// 重置restart
 			w.restart = false
 			continue
 		}
 		ctx.GetContext().Handler(msg, msg.Type, msg.Category)
 	}
 }
+
+/*
+wrappedServerStream部分
+
+云端 gRPC 服务在接受到 tunnel-edge 请求(建立 Stream 流)时，会调用 ServerStreamInterceptor，
+而 ServerStreamInterceptor 会从gRPC metadata 中解析出此 gRPC 连接对应的边缘节点名和token，并对该 token 进行校验，
+然后根据节点名构建 wrappedServerStream 作为与该边缘节点通信的处理对象(每个边缘节点对应一个处理对象)，
+handler 函数会调用 stream.TunnelStreaming，
+并将 wrappedServerStream 传递给它(wrappedServerStream 实现了proto.Stream_TunnelStreamingServer 接口)
+*/
 
 func ServerStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	klog.Info("start verifying the token !")
@@ -174,12 +207,15 @@ func ServerStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.S
 		klog.Errorf("failed to obtain token")
 		return fmt.Errorf("failed to obtain token")
 	}
+	// get bearer token
 	tk := strings.TrimPrefix(md["authorization"][0], "Bearer ")
 	auth, err := token.ParseToken(tk)
 	if err != nil {
 		klog.Error("token deserialization failed !")
 		return err
 	}
+
+	// 校验token合法性
 	if auth.Token != token.GetTokenFromCache(auth.NodeName) {
 		klog.Errorf("invalid token node = %s", auth.NodeName)
 		return ErrInvalidToken
@@ -187,6 +223,7 @@ func ServerStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.S
 	klog.Infof("token verification successful node = %s", auth.NodeName)
 	err = handler(srv, newServerWrappedStream(ss, auth.NodeName))
 	if err != nil {
+		//当 TunnelStreaming 方法退出时，执行移除节点的逻辑ctx.GetContext().RemoveNode
 		ctx.GetContext().RemoveNode(auth.NodeName)
 		klog.Errorf("node disconnected node = %s err = %v", auth.NodeName, err)
 	}
@@ -202,6 +239,10 @@ type wrappedServerStream struct {
 	node string
 }
 
+/*
+SendMsg 会从 wrappedServerStream 对应边缘节点 node 中接受 StreamMsg，
+并调用 ServerStream.SendMsg 发送该消息给 tunnel-edge
+*/
 func (w *wrappedServerStream) SendMsg(m interface{}) error {
 	if m != nil {
 		return w.ServerStream.SendMsg(m)
@@ -210,7 +251,9 @@ func (w *wrappedServerStream) SendMsg(m interface{}) error {
 	klog.Infof("node added successfully node = %s", node.GetName())
 	defer klog.Infof("streamServer no longer sends messages to edge node: %s", w.node)
 	for {
+		// cloud node上channel中
 		msg := <-node.NodeRecv()
+		// closed类型，连接断开 return
 		if msg.Category == util.STREAM && msg.Type == util.CLOSED {
 			klog.Error("streamServer turns off message sending")
 			return fmt.Errorf("streamServer stops sending messages to node: %s", w.node)
