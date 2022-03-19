@@ -25,7 +25,14 @@ tunnel是云边端通信的隧道，分为tunnel-cloud和tunnel-edge，分别承
    - tunnel-cloud根据节点名把请求信息转发到节点名对应的与tunnel-edge建立的grpc连接。
    - tunnel-edge根据接收的请求信息请求边缘节点上的应用。
 
-### Tunnel内部模块数据交互
+# tunnel模块分析
+
+参考
+
+- https://blog.csdn.net/yunxiao6/article/details/117023803
+- https://github.com/khalid-jobs/tunnel
+
+## Tunnel内部模块数据交互
 
 下图为 HTTPS 代理的数据流转，TCP 代理数据流转和 HTTPS 的类似，其中的关键步骤：
 
@@ -39,14 +46,14 @@ nodeContext 和 connContext 都是做连接的管理，但是 **nodeContext 管�
 
 ![img](https://tva1.sinaimg.cn/large/e6c9d24ely1h0finexx5fj20fb0idwfm.jpg)
 
-### Tunnel连接管理
+## Tunnel连接管理
 
 Tunnel 管理的连接可以分为**底层连接(云端隧道的 gRPC 连接)和上层应用连接(HTTPS 连接和 TCP 连接)**，连接异常的管理的可以分为以下几种场景：
 
 - gRPC 连接正常，上层连接异常：以 HTTPS 连接为例，tunnel-edge 的 HTTPS Client 与边缘节点 Server 连接异常断开，会发送 StreamMsg **(StreamMsg.Type=CLOSE)** 消息，tunnel-cloud 在接收到 StreamMsg 消息之后会主动关闭 HTTPS Server与HTTPS Client 的连接。
 - gRPC 连接异常：gRPC 连接异常，Stream 模块会根据与 gPRC 连接绑定的 node.connContext，向 HTTPS 和 TCP 模块发送 StreamMsg(StreamMsg.Type=CLOSE)，HTTPS 或 TCP 模块接收消息之后主动断开连接。
 
-### Stream模块
+## Stream模块
 
 - **Stream 模块负责建立 gRPC连接以及通信(云边隧道)**
 - **边缘节点上 tunnel-edge 主动连接云端 tunnel-cloud service**，tunnel-cloud service 根据负载均衡策略将请求转到tunnel-cloud pod
@@ -60,14 +67,14 @@ Tunnel 管理的连接可以分为**底层连接(云端隧道的 gRPC 连接)和
 
 ![img](https://tva1.sinaimg.cn/large/e6c9d24ely1h0fj65nsixj20k108xgm1.jpg)
 
-### Https代理模块
+## Https代理模块
 
 - HTTPS：负责**建立云边 HTTPS 代理**(eg：云端 kube-apiserver <-> 边端 kubelet)，并传输数据
 - 作用与 TCP 代理类似，不同的是 **tunnel-cloud 会读取云端组件 HTTPS 请求中携带的边缘节点名，并尝试建立与该边缘节点的 HTTPS 代理**；而**不是像 TCP 代理一样随机选择一个云边隧道**进行转发
 - 云端 apiserver 或者其它云端的应用访问边缘节点上的 kubelet 或者其它应用时,tunnel-dns 通过DNS劫持(将 Request host 中的节点名解析为 tunnel-cloud 的 podIp)把请求转发到 tunnel-cloud 的pod上,tunnel-cloud 把请求信息封装成 StreamMsg 通过与节点名对应的云边隧道发送到 tunnel-edge，tunnel-edge 通过接收到的 StreamMsg 的 Addr 字段和配置文件中的证书与边缘端 Server 建立 TLS 连接，并将 StreamMsg 中的请求信息写入 TLS 连接。tunnel-edge 从 TLS 连接中读取到边缘端 Server 的返回数据，将其封装成 StreamMsg 发送到 tunnel-cloud，tunnel-cloud 将接收到数据写入云端组件与 tunnel-cloud 建立的连接中。
   
 
-### TCP代理模块
+## TCP代理模块
 
 - TCP：负责在**多集群管理中建立云端与边端的 TCP 代理**
 - **云端组件通过 TCP 模块访问边缘端的 Server**：云端的 TCP Server 在接收到请求会将请求封装成 StreamMsg 通过云边隧道(在已连接的隧道中随机选择一个，因此推荐在只有一个 tunnel-edge 的场景下使用 TCP 代理)发送到 tunnel-edge，tunnel-edge 通过接收到 StreamMag 的Addr字段与边缘端 Server 建立TCP 连接，并将请求写入 TCP 连接。tunnel-edge 从 TCP 连接中读取边缘端 Server 的返回消息，通过云边缘隧道发送到tunnel-cloud，tunnel-cloud 接收到消息之后将其写入云端组件与 TCP Server 建立的连接
