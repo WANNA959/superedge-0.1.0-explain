@@ -13,33 +13,40 @@
 
 当**云边断连时**，访问kube-apiserver超时，从缓存中获取已缓存的数据返回给client，**达到边缘自治的目的**。
 
-- **HTTPS Server** 监听 localhost 的端口（SuperEdge 中为51003）接受 Client 的 Https 请求。
+![图片](https://tva1.sinaimg.cn/large/e6c9d24ely1gzt8psboxuj20p20hamyp.jpg)
+
+### HTTPS Server
+
+-  监听 localhost 的端口（SuperEdge 中为51003）接受 Client 的 Https 请求。
   - 实现是将kubelet.conf中cluster.server指向lite-apiserver监听地址，默认localhost:51003（默认是指向apiserver的监听地址
 
-- **Cert Mgr && Transport Mgr** 
-  - Cert Mgr 负责管理连接 kube-apiserver 的 **TLS 客户端证书**。它**周期性加载配置**的TLS证书，**如果有更新，通知Transport Mgr创建或更新对应的transport**。
-    - certManager.Init()
-      - 构建map：commonName-*tls.Certificate
+### Cert Mgr && Transport Mgr
 
-    - certManager.Start()
-      - 起一个goroutine，定期更新cert（reload loadCert、handleCertUpdate
-        - 定时器正常更新周期为30min，发现需要update，则马上更新
+- Cert Mgr 负责管理连接 kube-apiserver 的 **TLS 客户端证书**。它**周期性加载配置**的TLS证书，**如果有更新，通知Transport Mgr创建或更新对应的transport**。
+  - certManager.Init()
+    - 构建map：commonName-*tls.Certificate
 
-      - 通过certChannel  channel同步Transport Mgr更新（new/changed cert）
-        - cm.certChannel <- commonName
+  - certManager.Start()
+    - 起一个goroutine，定期更新cert（reload loadCert、handleCertUpdate
+      - 定时器正常更新周期为30min，发现需要update，则马上更新
 
-  - Transport Mgr负责管理transport（传输）。它**接收Cert Mgr的通知，创建新的transport，或者关闭证书已更新的transport的旧连接**。
-    - transportManager.Init()
-      - 构建map：commonName-*EdgeTransport
-    - transportManager.Start()
-      - 起一个goroutine监控certChannel
-        - new cert则创建新的transport
-        - old cert则关闭transport旧连接
-      - 起一个gorouine监控网卡变化 if transport changed, inform handler to create new EdgeReverseProxy
-      - 同样通过transportChannel同步inform handler to create new EdgeReverseProxy
-        - tm.transportChannel <- commonName
+    - 通过certChannel  channel同步Transport Mgr更新（new/changed cert）
+      - cm.certChannel <- commonName
 
-- **Proxy** 根据 request mtls 证书中的 Common Name 选择对应的 ReverseProxy（如果 request 没有 mtls 证书，则使用 default），将 request 转发到 kube-apiserver。如果请求成功，则将结果直接给 Client 返回，并调用 Cache Mgr 缓存数据；如果请求失败，则从 Cache Mgr 中读取数据给 Client。
+- Transport Mgr负责管理transport（传输）。它**接收Cert Mgr的通知，创建新的transport，或者关闭证书已更新的transport的旧连接**。
+  - transportManager.Init()
+    - 构建map：commonName-*EdgeTransport
+  - transportManager.Start()
+    - 起一个goroutine监控certChannel
+      - new cert则创建新的transport
+      - old cert则关闭transport旧连接
+    - 起一个gorouine监控网卡变化 if transport changed, inform handler to create new EdgeReverseProxy
+    - 同样通过transportChannel同步inform handler to create new EdgeReverseProxy
+      - tm.transportChannel <- commonName
+
+### Proxy
+
+-  根据 request mtls 证书中的 Common Name 选择对应的 ReverseProxy（如果 request 没有 mtls 证书，则使用 default），将 request 转发到 kube-apiserver。如果请求成功，则将结果直接给 Client 返回，并调用 Cache Mgr 缓存数据；如果请求失败，则从 Cache Mgr 中读取数据给 Client。
   - h.initProxies()
     - init proxy 为每个*EdgeTransport建立EdgeReverseProxy
 
@@ -47,27 +54,30 @@
     - 起一个goroutine监控transportChannel的commonName，在transport修改的后修改对应的ReverseProxy（更新reverseProxyMap
       - **cert change→certChannel→transport change→transportChannel→ReverseProxy change**
 
-- **Cache Mgr** 根据 Client 的类型分别**缓存 Get 和 List 的结果数据**，并**根据 Watch 的返回值，更新对应的 List 数据**。
-  - 支持多种cache类型，默认file_storage
-    - 每个类型实现了Storage interface
+### Cache Mgr
 
-  - 写cache时机：定义在httputil.ReverseProxy的modifyResponse下，在响应时候将response写缓存，cache对象only cache resource request（get请求）且status=http.StatusOK（cache内容包括statusCode、header、body）
-    - key为keys := []string{userAgent, info.Namespace, info.Resource, info.Name, info.Subresource}  join
-      - +list
-    - **三种info.verb类型**（info, ok := apirequest.RequestInfoFrom(req.Context())
-      - verb == constant.VerbWatch（list-watch机制
-        - cacheWatch：eventType为watch.Added, watch.Modified, watch.Deleted，读list cache并更新，重新写入list cache
+- 根据 Client 的类型分别**缓存 Get 和 List 的结果数据**，并**根据 Watch 的返回值，更新对应的 List 数据**。
 
-      - verb == constant.VerbList
-        - cacheList-StoreList
+- 支持多种cache类型，默认file_storage
+  - 每个类型实现了Storage interface
 
-      - verb == constant.VerbGet
-        - cacheGet-StoreOne
+- 写cache时机：定义在httputil.ReverseProxy的modifyResponse下，在响应时候将response写缓存，cache对象only cache resource request（get请求）且status=http.StatusOK（cache内容包括statusCode、header、body）
+  - key为keys := []string{userAgent, info.Namespace, info.Resource, info.Name, info.Subresource}  join
+    - +list
+  - **三种info.verb类型**（info, ok := apirequest.RequestInfoFrom(req.Context())
+    - verb == constant.VerbWatch（list-watch机制
+      - cacheWatch：eventType为watch.Added, watch.Modified, watch.Deleted，读list cache并更新，重新写入list cache
 
-  - 读cache时机：定义在httputil.ReverseProxy的ErrorHandler下，如timeout的时候执行
+    - verb == constant.VerbList
+      - cacheList-StoreList
+
+    - verb == constant.VerbGet
+      - cacheGet-StoreOne
+
+- 读cache时机：定义在httputil.ReverseProxy的ErrorHandler下，如timeout的时候执行
 
 
-![图片](https://tva1.sinaimg.cn/large/e6c9d24ely1gzt8psboxuj20p20hamyp.jpg)
+
 
 总的来说：对于边缘节点的组件，lite-apiserver提供的功能就是kube-APIServer，但是一方面lite-apiserver只对本节点有效，另一方面资源占用很少。
 
@@ -75,7 +85,7 @@
 
 ## edge-health & edge-health-admission
 
-### edge-health
+### 分布式健康监测
 
 - **强调只有在确认边缘节点异常的情况下才会产生Pod驱逐**
   - 在非对称网络下，边缘场景无法采用**原生k8s的节点断连处理方法**
@@ -98,27 +108,37 @@
 
 ![图片](https://tva1.sinaimg.cn/large/e6c9d24ely1gzthxgqeolj20u008i3zh.jpg)
 
-> 分布式健康检查功能由边端的 edge-health-daemon 以及云端的 edge-health-admission 组成，功能分别如下：
+### edge-health
 
-edge-health-daemon：对同区域边缘节点执行分布式健康检查，并向 apiserver 发送健康状态投票结果(给 node 打 annotation)，主体逻辑包括四部分功能：
+对同区域边缘节点执行分布式健康检查，并向 apiserver 发送健康状态投票结果(给 node 打 annotation)，主体逻辑包括四部分功能：
 
-- SyncNodeList：根据边缘节点所在的 zone 刷新 node cache（**该node需要检测哪些edge node**），同时更新 CheckInfoData相关数据
-  - 定时器，默认周期10s：go wait.Until(check.GetNodeList, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done()) 
-  - 按照如下情况分类刷新 node cache：
-    - 没有开启多地域检测：会**获取所有边缘节点列表并刷新 node cache**
-      - kube-system namespace 下**不存在名为 edge-health-zone-config的configmap**
-      - **存在edge-health-zone-config   configmap，但数据部分** **TaintZoneAdmission 为 false**
-    - 开启多地域检测：存在edge-health-zone-config  configmap，且**TaintZoneAdmission 为 true。检查是否有"superedgehealth/topology-zone"标签(标示区域)**
-      - 有，则获取**该label value 相同的节点列表并刷新 node cache**
-      - 无，则只会将边缘节点本身添加到分布式健康检查节点列表中并刷新 **node cache(only itself)**
-- ExecuteCheck：对每个边缘节点执行若干种类的健康检查插件(ping，kubelet等)，并将各插件检查分数汇总，根据用户设置的基准线得出节点是否健康的结果
-  - 定时器，默认周期10s：go wait.Until(check.Check, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done())
-  - 目前支持ping和kubelet两种插件，**实现flag.value接口，set 添加到 PluginInfo plugin列表中**
-    - 并发执行各检查插件，并同步阻塞：同步所有插件、同步某个插件下所有node得分
-    - 每个plugin对应一个权重weight，正常为100*weight，不正常为0分
-      - 各plugin weight之和为1
-  - 同步完成后，**统计一个checked ip下所有plugin的totalscore**，若大于HealthCheckScoreLine，则**认定为normal=true，否则为false，将结果写到ResultData**
-- Commun：将本节点对其它各节点健康检查的结果发送给其它节点
+#### SyncNodeList
+
+根据边缘节点所在的 zone 刷新 node cache（**该node需要检测哪些edge node**），同时更新 CheckInfoData相关数据
+
+- 定时器，默认周期10s：go wait.Until(check.GetNodeList, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done()) 
+- 按照如下情况分类刷新 node cache：
+  - 没有开启多地域检测：会**获取所有边缘节点列表并刷新 node cache**
+    - kube-system namespace 下**不存在名为 edge-health-zone-config的configmap**
+    - **存在edge-health-zone-config   configmap，但数据部分** **TaintZoneAdmission 为 false**
+  - 开启多地域检测：存在edge-health-zone-config  configmap，且**TaintZoneAdmission 为 true。检查是否有"superedgehealth/topology-zone"标签(标示区域)**
+    - 有，则获取**该label value 相同的节点列表并刷新 node cache**
+    - 无，则只会将边缘节点本身添加到分布式健康检查节点列表中并刷新 **node cache(only itself)**
+
+#### ExecuteCheck
+
+对每个边缘节点执行若干种类的健康检查插件(ping，kubelet等)，并将各插件检查分数汇总，根据用户设置的基准线得出节点是否健康的结果
+
+- 定时器，默认周期10s：go wait.Until(check.Check, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done())
+- 目前支持ping和kubelet两种插件，**实现flag.value接口，set 添加到 PluginInfo plugin列表中**
+  - 并发执行各检查插件，并同步阻塞：同步所有插件、同步某个插件下所有node得分
+  - 每个plugin对应一个权重weight，正常为100*weight，不正常为0分
+    - 各plugin weight之和为1
+- 同步完成后，**统计一个checked ip下所有plugin的totalscore**，若大于HealthCheckScoreLine，则**认定为normal=true，否则为false，将结果写到ResultData**
+
+#### Commun
+
+- 将本节点对其它各节点健康检查的结果发送给其它节点
   - 数据有效性校验：以 kube-system 下的 hmac-config configmap **hmackey 字段为 key**，对 SourceIP 以及 CheckDetail进行 hmac（**sha256） 得到，用于判断传输数据的有效性(是否被篡改)**
   - 相互发送健康结果，故需要server（接收）+client（发送）
     - go commun.Server(ctx, &wg)
@@ -126,7 +146,10 @@ edge-health-daemon：对同区域边缘节点执行分布式健康检查，并�
     - go wait.Until(commun.Client, time.Duration(commun.GetPeriod())*time.Second, ctx.Done())
       - Client：desIp+51005/result发送CommunicateData（含构建hmac
   - 将得到的CommunicateData结果写入ResultData，resultDetail.time改为当前时间（不同node时间可能不同步
-- Vote：对所有节点健康检查的结果分类
+
+#### Vote
+
+- 对所有节点健康检查的结果分类
   - go wait.Until(vote.Vote, time.Duration(vote.GetVotePeriod())*time.Second, ctx.Done())
   - 三种vote结果
     - 如果超过一半(>)的节点对该节点的检查结果为正常，则认为该节点状态正常(注意时间差在 VoteTimeout 内)
@@ -207,7 +230,80 @@ webhooks:
 
 ## tunnel
 
+- 节点注册：node1和node2为边缘节点，tunnel-cloud将接收到请求的对应edge node（node1、2）和自身的pod Ip的mapping写入dns
+- 请求的代理转发：当apiserver需要访问edge node（根据node name），根据上述dns规则，tunnel dns会返回实际和tunnel edge node连接的tunnel-cloud ip，从**而请求转发到tunnel-cloud的pod**，cloud个对应tunnel-edge建立grpc连接，tunnel-edge根据接收的请求信息请求边缘节点上的应用。
 
+![图片](https://tva1.sinaimg.cn/large/e6c9d24ely1gzth9lnb6xj20hk0i4wg0.jpg)
+
+### Tunnel内部模块数据交互
+
+下图为 HTTPS 代理的数据流转，TCP 代理数据流转和 HTTPS 的类似，其中的关键步骤：
+
+- HTTPS Server -> StreamServer（2）：**HTTPS Server 通过 Channel将 StreamMsg 发送给 Stream Server**，其中的 Channel 是根据 StreamMsg.Node 字段从 nodeContext 获取 node.Channel
+
+- StreamServer -> StreamClient（3）: 每个**云边隧道都会分配一个 node 对象，将StreamMsg发送到 node（隧道对应的edge node） 中的 Channel** 即可把数据发往 StreamClient
+
+- StreamServer -> HTTPS Server（5）: StreamServer **通过 Channel 将 StreamMsg 发送给 HTTPS Server**，其中的 Channel 是根据 StreamMsg.Node从nodeContext 获取 node，通过 StreamMsg.Topic 与 conn.uid 匹配获取 HTTPS 模块的 conn.Channel
+
+> **nodeContext 和 connContext 都是做连接的管理，其交互关系如下**
+
+- **nodeContext 管理 gRPC 长连接的和 connContext 管理的上层转发请求的连接(TCP 和 HTTPS)的生命周期是不相同的，因此需要分开管理**
+  - edge/cloud收到tcp or https类型的请求的时候，将streamMsg写入到node.channel中
+  - 根据interceptor，Node.recvMsg时，会调用对应的handler——接收到非hearbeat类型streamMsg（tcp or htpps），即可调用FrontendHandler、BackendHandler等将msg写入conn.channel中
+  - edge/cloud发送tcp ort https类型的请求的时候，从conn.channel中读streamMsg，并构建tcp请求发送
+
+![img](https://tva1.sinaimg.cn/large/e6c9d24ely1h0finexx5fj20fb0idwfm.jpg)
+
+### Tunnel连接管理
+
+Tunnel 管理的连接可以分为**底层连接(云端隧道的 gRPC 连接)和上层应用连接(HTTPS 连接和 TCP 连接)**，连接异常的管理的可以分为以下几种场景：
+
+- gRPC 连接正常，上层连接异常：以 HTTPS 连接为例，tunnel-edge 的 HTTPS Client 与边缘节点 Server 连接异常断开，会发送 StreamMsg **(StreamMsg.Type=CLOSE)** 消息，tunnel-cloud 在接收到 StreamMsg 消息之后会主动关闭 HTTPS Server与HTTPS Client 的连接。
+- gRPC 连接异常：gRPC 连接异常，Stream 模块会根据与 gPRC 连接绑定的 node.connContext，向 HTTPS 和 TCP 模块发送 StreamMsg(StreamMsg.Type=CLOSE)，HTTPS 或 TCP 模块接收消息之后主动断开连接。
+
+### Stream模块
+
+- **Stream 模块负责建立 gRPC连接以及通信(云边隧道)**
+  - stream.send起两个goroutine（wrappedClientStream.SendMsg + wrappedClientStream.RecvMsg）
+  - cloud端：stream.go go connect.StartServer() →grpcserver.go StartServer →streamserver.go TunnelStreaming →streaminterceptor.go wrappedClientStream（sendMsg、RecvMsg）
+  - edge端：stream.go go connect.StartSendClient()→grpcclient.go StartSendClient →streamclient.go Send()→streaminterceptor.go wrappedServerStream（sendMsg、RecvMsg）
+  
+- **边缘节点上 tunnel-edge 主动连接云端 tunnel-cloud service**，tunnel-cloud service 根据负载均衡策略将请求转到tunnel-cloud pod
+- tunnel-edge 与 tunnel-cloud 建立 gRPC 连接后，tunnel-cloud 会把自身的 podIp 和 tunnel-edge 所在节点的 nodeName 的映射写入**tunnel-coredns**。gRPC 连接断开之后，tunnel-cloud 会删除相关 podIp 和节点名的映射
+- tunnel-edge 会利用边缘节点名以及 token 构建 gRPC 连接，**而 tunnel-cloud 会通过认证信息解析 gRPC 连接对应的边缘节点（一个cloud可能对应多个edge node）**，并对每个边缘节点分别构建一个 wrappedServerStream 进行处理(同一个 tunnel-cloud 可以处理多个 tunnel-edge 的连接)
+- **tunnel-cloud** 每隔一分钟(考虑到 configmap 同步 tunnel-cloud 的 pod 挂载文件的时间)**向 tunnel-coredns 的 hosts 插件的配置文件对应 configmap 同步一次边缘节点名以及 tunnel-cloud podIp 的映射（**内存同步configmap**
+
+![img](https://tva1.sinaimg.cn/large/e6c9d24ely1h0fj65nsixj20k108xgm1.jpg)
+
+- tunnel-edge **每隔一分钟会向 tunnel-cloud 发送代表该节点正常的心跳 StreamMsg**，而 tunnel-cloud 在接受到该心跳后会进行回应(心跳是为了探测 gRPC Stream 流是否正常)
+  - edge端wrappedClientStream.SendMsg发送heartbeat给cloud，若在1min内没有收到cloud端的回复 or 有error产生，则构建type=closed类型的StreamMsg
+- **StreamMsg类型： 包括心跳，TCP 代理以及 HTTPS 请求等不同类型消息**
+- tunnel-cloud **通过 context.node 区分与不同边缘节点 gRPC 连接隧道**
+
+### ~~Https代理模块~~
+
+- HTTPS：负责**建立云边 HTTPS 代理**(eg：云端 kube-apiserver <-> 边端 kubelet)，并传输数据
+- 作用与 TCP 代理类似，不同的是 **tunnel-cloud 会读取云端组件 HTTPS 请求中携带的边缘节点名，并尝试建立与该边缘节点的 HTTPS 代理**；而**不是像 TCP 代理一样随机选择一个云边隧道**进行转发
+- 云端 apiserver 或者其它云端的应用访问边缘节点上的 kubelet 或者其它应用时,tunnel-dns 通过DNS劫持(将 Request host 中的节点名解析为 tunnel-cloud 的 podIp)把请求转发到 tunnel-cloud 的pod上,tunnel-cloud 把请求信息封装成 StreamMsg 通过与节点名对应的云边隧道发送到 tunnel-edge，tunnel-edge 通过接收到的 StreamMsg 的 Addr 字段和配置文件中的证书与边缘端 Server 建立 TLS 连接，并将 StreamMsg 中的请求信息写入 TLS 连接。tunnel-edge 从 TLS 连接中读取到边缘端 Server 的返回数据，将其封装成 StreamMsg 发送到 tunnel-cloud，tunnel-cloud 将接收到数据写入云端组件与 tunnel-cloud 建立的连接中。
+
+### TCP代理模块
+
+- TCP：负责在**多集群管理中建立云端与边端的 TCP 代理**
+  - cloud端
+    - 起一个tcp server：net.Listen("tcp", front)
+    - **云端组件作为client主动建立连接**
+  - edge端
+    - edge端组件作为server
+    - FrontendHandler中，**edge作为客户端net.DialTCP("tcp", nil, tcpAddr)，主动建立连接连接**
+  - edge/cloud端都起两个goroutine
+    - read：读edge/cloud端组件发来的tcp请求，并构建为StreamMsg Send2Node发送到node channel中
+    - write：msg := <-tcp.C.ConnRecv()，msg.data发送给edge/cloud端组件
+- **云端组件通过 TCP 模块访问边缘端的 Server**
+  - 云端的 TCP Server 在接收到请求会将请求封装成 StreamMsg 通过云边隧道(在已连接的隧道中随机选择一个，因此推荐在只有一个 tunnel-edge 的场景下使用 TCP 代理)发送到 tunnel-edge
+  - tunnel-edge 通过接收到 StreamMag 的Addr字段与边缘端 Server 建立TCP 连接，并将请求写入 TCP 连接。
+  - tunnel-edge 从 TCP 连接中读取边缘端 Server 的返回消息
+  - 通过云边缘隧道发送到tunnel-cloud
+  - tunnel-cloud 接收到消息之后将其写入云端组件与 TCP Server 建立的连接
 
 ## Reference
 
@@ -218,3 +314,6 @@ webhooks:
 - https://blog.csdn.net/yunxiao6/article/details/115066385?ops_request_misc=%257B%2522request%255Fid%2522%253A%2522164770292816780274187372%2522%252C%2522scm%2522%253A%252220140713.130102334.pc%255Fblog.%2522%257D&request_id=164770292816780274187372&biz_id=0&utm_medium=distribute.pc_search_result.none-task-blog-2~blog~first_rank_ecpm_v1~rank_v31_ecpm-6-115066385.nonecase&utm_term=superedge&spm=1018.2226.3001.4450
 
 - https://blog.csdn.net/yunxiao6/article/details/115203688?ops_request_misc=%257B%2522request%255Fid%2522%253A%2522164770292816780274187372%2522%252C%2522scm%2522%253A%252220140713.130102334.pc%255Fblog.%2522%257D&request_id=164770292816780274187372&biz_id=0&utm_medium=distribute.pc_search_result.none-task-blog-2~blog~first_rank_ecpm_v1~rank_v31_ecpm-10-115203688.nonecase&utm_term=superedge&spm=1018.2226.3001.4450
+
+- https://blog.csdn.net/yunxiao6/article/details/117023803
+- https://github.com/khalid-jobs/tunnel

@@ -85,6 +85,7 @@ func (w *wrappedClientStream) SendMsg(m interface{}) error {
 		return w.ClientStream.SendMsg(m)
 	}
 
+	// edge端 发送gRPC消息的时候添加node节点（添加到nodeContext中，nodes仅此一个node
 	nodeName := os.Getenv(util.NODE_NAME_ENV)
 	node := ctx.GetContext().AddNode(nodeName)
 	klog.Infof("node added successfully node = %s", nodeName)
@@ -119,6 +120,8 @@ func (w *wrappedClientStream) SendMsg(m interface{}) error {
 					})
 					count += 1
 				} else {
+					// 理想情况下，一直走else，因为在recvMsg中，edge node总能在1min内收到cloud的heartbeat消息（restart=false
+					// 正常发送STREAM_HEART_BEAT消息
 					hnode.Send2Node(&proto.StreamMsg{
 						Node:     os.Getenv(util.NODE_NAME_ENV),
 						Category: util.STREAM,
@@ -144,6 +147,7 @@ func (w *wrappedClientStream) SendMsg(m interface{}) error {
 			return fmt.Errorf("streamClient stops sending messages to server node: %s", os.Getenv(util.NODE_NAME_ENV))
 		}
 		klog.V(8).Infof("streamClinet starts to send messages to the server node: %s uuid: %s", msg.Node, msg.Topic)
+
 		// 发送 STREAM_HEART_BEAT 类型 msg
 		err := w.ClientStream.SendMsg(msg)
 		if err != nil {
@@ -182,6 +186,7 @@ func (w *wrappedClientStream) RecvMsg(m interface{}) error {
 			w.restart = false
 			continue
 		}
+		// 调用RegisterHandler中对应的handler
 		ctx.GetContext().Handler(msg, msg.Type, msg.Category)
 	}
 }
@@ -247,6 +252,7 @@ func (w *wrappedServerStream) SendMsg(m interface{}) error {
 	if m != nil {
 		return w.ServerStream.SendMsg(m)
 	}
+	//
 	node := ctx.GetContext().AddNode(w.node)
 	klog.Infof("node added successfully node = %s", node.GetName())
 	defer klog.Infof("streamServer no longer sends messages to edge node: %s", w.node)

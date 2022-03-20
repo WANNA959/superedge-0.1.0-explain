@@ -23,6 +23,7 @@ import (
 	"superedge/pkg/tunnel/proto"
 )
 
+// edge/cloud heartbeat handler
 func HeartbeatHandler(msg *proto.StreamMsg) error {
 	// 根据edge node名称获取node
 	node := context.GetContext().GetNode(msg.Node)

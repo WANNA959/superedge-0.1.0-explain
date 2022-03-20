@@ -41,14 +41,18 @@ func (tcp *TcpProxy) Name() string {
 
 // 在多集群管理中建立云端管控集群与边缘独立集群的一条 TCP 代理隧道
 func (tcp *TcpProxy) Start(mode string) {
-	// 注册了 StreamMsg 的处理函数：register三个handler tcp: handeler name: handler
-	// CLOSED 处理函数主要处理关闭连接的消息
+	// 注册了 StreamMsg 的处理函数：register三个handler tcp——handeler name: handler
+	// TCP_CONTROL 处理函数主要处理关闭连接的消息
 	// 在接受到云端组件的请求后，TCP Server 会将请求封装成 StremMsg 发送给 StreamServer，
 	// 由 StreamServer 发送到 tunnel-edge,其中 StreamMsg.Type=FrontendHandler，
 	// StreamMsg.Node 从已建立的云边隧道的节点中随机选择一个。
 	// tunnel-edge 在接受到该StreamMsg 后，会调用 FrontendHandler 函数处理
+
+	// edge发送给cloud，topic=BackendHandler
 	context.GetContext().RegisterHandler(util.TCP_BACKEND, tcp.Name(), tcpmsg.BackendHandler)
+	// cloud发送给edge，topic=FrontendHandler，edge调用FrontendHandler处理
 	context.GetContext().RegisterHandler(util.TCP_FRONTEND, tcp.Name(), tcpmsg.FrontendHandler)
+	// close
 	context.GetContext().RegisterHandler(util.TCP_CONTROL, tcp.Name(), tcpmsg.ControlHandler)
 	if mode == util.CLOUD {
 		// "0.0.0.0:6443" = "127.0.0.1:6443"
@@ -79,7 +83,9 @@ func (tcp *TcpProxy) Start(mode string) {
 					fp := tcpmng.NewTcpConn(uuid, backend, node)
 					fp.Conn = rawConn
 					fp.Type = util.TCP_FRONTEND
+					// 发送给云端组件请求
 					go fp.Write()
+					// 接收云端组件请求
 					go fp.Read()
 				}
 			}(front, backend)

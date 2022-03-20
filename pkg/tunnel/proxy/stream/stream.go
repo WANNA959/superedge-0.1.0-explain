@@ -40,6 +40,7 @@ func (stream *Stream) Name() string {
 }
 
 func (stream *Stream) Start(mode string) {
+	// 调用 RegisterHandler 注册心跳消息处理函数 HeartbeatHandler
 	// protocolContext protocols中添加对应的module-key-handler
 	context.GetContext().RegisterHandler(util.STREAM_HEART_BEAT, util.STREAM, streammsg.HeartbeatHandler)
 	var channelzAddr string

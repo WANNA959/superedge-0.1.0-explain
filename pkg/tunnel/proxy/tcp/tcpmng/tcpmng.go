@@ -54,10 +54,12 @@ func (tcp *TcpConn) Write() {
 	for running {
 		select {
 		case msg := <-tcp.C.ConnRecv():
+			// close
 			if msg.Type == util.TCP_CONTROL {
 				tcp.cleanUp()
 				break
 			}
+			// 正常，发送给edge/cloud端组件
 			_, err := tcp.Conn.Write(msg.Data)
 			if err != nil {
 				klog.Errorf("write conn fail err = %v", err)
@@ -91,6 +93,7 @@ func (tcp *TcpConn) Read() {
 				}
 			}
 			buf := make([]byte, size)
+			// 读edge/cloud端发来的请求，并构建为StreamMsg发送到node channel中
 			n, err := tcp.Conn.Read(buf)
 			if err != nil {
 				klog.Errorf("conn read fail，err = %s ", err)
@@ -121,6 +124,7 @@ func (tcp *TcpConn) cleanUp() {
 // node channel发送msg
 func (tcp *TcpConn) closeOpposite() {
 	tcp.once.Do(func() {
+		// 发送node channel close
 		tcp.n.Send2Node(&proto.StreamMsg{
 			Category: util.TCP,
 			Type:     util.TCP_CONTROL,

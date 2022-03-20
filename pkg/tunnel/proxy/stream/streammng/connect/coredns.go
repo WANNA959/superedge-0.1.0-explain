@@ -110,7 +110,7 @@ func SynCorefile() {
 }
 
 /*
-parseHosts 获取本地 hosts 文件中边缘节点名称以及对应 tunnel-cloud podIp 映射列表
+parseHosts 获取本地 hosts 文件中 边缘节点名称 以及 对应 tunnel-cloud podIp 映射列表
 对比 podIp 的对应节点名和内存中节点名，如果有变化则将这个内容覆盖写入 configmap 并更新
 */
 func parseHosts() (map[string]string, bool) {
@@ -121,6 +121,7 @@ func parseHosts() (map[string]string, bool) {
 		return nil, false
 	}
 	scanner := bufio.NewScanner(file)
+	//mode.cloud.stream.dns.service对应的endpoints
 	eps, err := coreDns.ClientSet.CoreV1().Endpoints(coreDns.Namespace).Get(cctx.Background(), conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Service, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("failed to get %s endpoint ip err = %v", conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Service, err)
@@ -138,11 +139,13 @@ func parseHosts() (map[string]string, bool) {
 			update = true
 			continue
 		}
+		// ip address
 		addr := parseIP(string(f[0]))
 		if addr == nil {
 			update = true
 			continue
 		}
+		// 当前cloud node ip一致
 		if addr.String() == coreDns.PodIp {
 			if !update {
 				if context.GetContext().NodeIsExist(string(f[1])) {
