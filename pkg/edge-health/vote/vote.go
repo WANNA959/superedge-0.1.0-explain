@@ -69,6 +69,7 @@ func (vote VoteEdge) Vote() {
 		for ip, resultdetail := range v { //ip is checked ip
 			// 本node or 其他没有voteTimeout的node
 			if k == common.LocalIp || (k != common.LocalIp && !time.Now().After(resultdetail.Time.Add(time.Duration(vote.GetVoteTimeout())*time.Second))) {
+				// 总共有多少vote
 				healthNodeMap[k] = "" //node is a health node if it has at least one valid check
 				if _, ok := voteCountMap[ip]; !ok {
 					voteCountMap[ip] = make(map[string]int)
@@ -99,6 +100,7 @@ func (vote VoteEdge) Vote() {
 	}
 	for ip, v := range voteCountMap {
 		if _, ok := v["yes"]; ok {
+			// majority vote yes 状态正常
 			if float64(v["yes"]) >= num {
 				log.V(4).Infof("vote: vote yes to master begin")
 				name := util.GetNodeNameByIp(data.NodeList.NodeList.Items, ip)
@@ -127,6 +129,7 @@ func (vote VoteEdge) Vote() {
 		}
 
 		if _, ok := v["no"]; ok {
+			// majority vote no 状态异常
 			if float64(v["no"]) >= num {
 				log.V(4).Infof("vote: vote no to master begin")
 				name := util.GetNodeNameByIp(data.NodeList.NodeList.Items, ip)

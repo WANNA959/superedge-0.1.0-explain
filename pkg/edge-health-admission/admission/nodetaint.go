@@ -70,6 +70,7 @@ func nodeTaint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	nodeResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"}
 	reviewResponse := v1beta1.AdmissionResponse{}
 
+	// 检查AdmissionReview.Request.Resource是否为node资源
 	// Resource is the fully-qualified resource being requested (for example, v1.pods)
 	if ar.Request.Resource != nodeResource {
 		//klog.V(4).Infof("Request is not nodes, ignore, is %s", ar.Request.Resource.String())
@@ -81,6 +82,7 @@ func nodeTaint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	// nodeResource需要进一步admission
 	//klog.V(4).Infof("Request is nodes, is %s", ar.Request)
 
+	// 将AdmissionReview.Request.Object.Raw转化为node对象
 	reviewResponseNode, nodeNew, err := decodeRawNode(ar, "new")
 	if err != nil {
 		return reviewResponseNode
@@ -105,11 +107,14 @@ func nodeTaint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	*/
 	// 如果处于unknown状态，则
 	if condition.Status == v1.ConditionUnknown {
+		//执行协助边端健康检查核心逻辑：在节点处于ConditionUnknown状态且分布式健康检查结果为正常的情况下，
+		//若节点存在NoExecute(node.kubernetes.io/unreachable) taint，则将其移除
 		if _, ok := nodeNew.Annotations["nodeunhealth"]; !ok {
+			// 分布式健康检测健康
+
 			// oldTaint保留，仅记录需要添加的taint
 			taintsToAdd, _ := util.TaintSetDiff(nodeNew.Spec.Taints, nodeOld.Spec.Taints)
 
-			// todo ...?
 			if _, flag := util.TaintExistsPosition(taintsToAdd, UnreachNoExecuteTaint); flag {
 				index, _ := util.TaintExistsPosition(nodeNew.Spec.Taints, UnreachNoExecuteTaint)
 
@@ -122,7 +127,7 @@ func nodeTaint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			} else if _, resflag := util.TaintExistsPosition(nodeNew.Spec.Taints, UnreachNoExecuteTaint); resflag {
 				index, _ := util.TaintExistsPosition(nodeNew.Spec.Taints, UnreachNoExecuteTaint)
 
-				// 若taintsToAdd中存在不存在UnreachNoExecuteTaint这个taint，但是nodeNew有（说明oldNode有
+				// 若taintsToAdd中存在不存在UnreachNoExecuteTaint这个taint，但是nodeNew有（说明oldNode有，删除taint
 				patches = append(patches, &Patch{
 					OP:   "remove",
 					Path: fmt.Sprintf("/spec/taints/%d", index),
@@ -138,7 +143,7 @@ func nodeTaint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			}
 		}
 	}
-
+	//设置AdmissionReview.Response.Allowed为true，表示无论如何都准许该请求
 	reviewResponse.Allowed = true
 
 	return &reviewResponse
@@ -192,15 +197,18 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 
 	deserializer := Codecs.UniversalDeserializer()
 	// request 解码
+	// 解析request.Body为AdmissionReview对象，并赋值给requestedAdmissionReview
 	if _, _, err := deserializer.Decode(body, nil, &requestedAdmissionReview); err != nil {
 		klog.Error(err)
 		responseAdmissionReview.Response = toAdmissionResponse(err)
 	} else {
 		// pass to admitFunc
+		//对AdmissionReview对象执行admit函数，并赋值给回responseAdmissionReview
 		responseAdmissionReview.Response = admit(requestedAdmissionReview)
 	}
 
 	// Return the same UID
+	// 设置responseAdmissionReview.Response.UID为请求的AdmissionReview.Request.UID
 	responseAdmissionReview.Response.UID = requestedAdmissionReview.Request.UID
 
 	klog.V(7).Info(fmt.Sprintf("sending response: %v", responseAdmissionReview.Response))

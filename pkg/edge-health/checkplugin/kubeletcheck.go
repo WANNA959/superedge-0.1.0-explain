@@ -36,7 +36,16 @@ func (p KubeletCheckPlugin) Name() string {
 	return "KubeletCheck"
 }
 
-// todo plugin set call？
+/*
+Value is the interface to the dynamic value stored in a flag.
+type Value interface {
+	String() string
+	Set(string) error
+	Type() string
+}
+*/
+
+// 实现了flag.value接口
 func (p *KubeletCheckPlugin) Set(s string) error {
 	var (
 		err error
@@ -88,9 +97,11 @@ func (plugin KubeletCheckPlugin) CheckExecute(wg *sync.WaitGroup) {
 			checkOk, err := ping(plugin.HealthCheckoutTimeOut, plugin.HealthCheckRetryTime, temp, plugin.Port)
 			if checkOk {
 				klog.V(4).Infof("%s use %s plugin check %s successd", common.LocalIp, plugin.Name(), temp)
+				// 成功100分，要乘权重weight
 				data.CheckInfoResult.SetCheckInfo(temp, plugin.Name(), plugin.GetWeight(), 100)
 			} else {
 				klog.V(2).Infof("%s use %s plugin check %s failed, reason: %s", common.LocalIp, plugin.Name(), temp, err.Error())
+				// 失败0分
 				data.CheckInfoResult.SetCheckInfo(temp, plugin.Name(), plugin.GetWeight(), 0)
 			}
 			execwg.Done()

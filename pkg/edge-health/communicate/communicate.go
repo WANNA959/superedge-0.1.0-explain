@@ -122,6 +122,7 @@ func (c CommunicateEdge) Server(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (c CommunicateEdge) Client() {
+	// 只需要发送本node健康检测结果
 	if _, ok := data.Result.Result[common.LocalIp]; ok {
 		tempCommunicateData := data.Result.CopyLocalResultData(common.LocalIp)
 
@@ -135,10 +136,12 @@ func (c CommunicateEdge) Client() {
 				if des != common.LocalIp {
 					// 重试
 					for i := 0; i < c.CommunicateRetryTime; i++ {
+						// build CommunicateData
 						u := data.CommunicateData{SourceIP: common.LocalIp, ResultDetail: tempCommunicateData}
 						if hmac, err := util.GenerateHmac(u); err != nil {
 							log.Errorf("Communicate Client: generateHmac err: %v", err)
 						} else {
+							// add CommunicateData Hmac
 							u.Hmac = hmac
 						}
 						log.V(4).Infof("Communicate Client: ready to put data: %v to %s", u, des)

@@ -35,18 +35,21 @@ func EndPoint(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, endPoint)
 }
 
+// 和nodetaint相似
 func endPoint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	var endpointNew corev1.Endpoints
 
 	klog.V(7).Info("admitting endpoints")
 	endpointResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "endpoints"}
 	reviewResponse := v1beta1.AdmissionResponse{}
+	//检查AdmissionReview.Request.Resource是否为endpoints资源
 	if ar.Request.Resource != endpointResource {
 		//klog.V(4).Infof("Request is not nodes, ignore, is %s", ar.Request.Resource.String())
 		reviewResponse = v1beta1.AdmissionResponse{Allowed: true}
 		return &reviewResponse
 	}
 
+	//将AdmissionReview.Request.Object.Raw转化为endpoints对象
 	reviewResponseEndPoint, endpointNew, err := decodeRawEndPoint(ar, "new")
 	if err != nil {
 		return reviewResponseEndPoint
@@ -56,7 +59,6 @@ func endPoint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 
 	// Endpoints is a collection of endpoints that implement the actual service. Example:
 
-	// todo ...?
 	for i1, EndpointSubset := range endpointNew.Subsets {
 		// IP addresses which offer the related ports but are not currently marked as ready
 		if len(EndpointSubset.NotReadyAddresses) != 0 {
@@ -68,14 +70,16 @@ func endPoint(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 					_, condition := util.GetNodeCondition(&node.Status, v1.NodeReady)
 					// 不含nodeunhealth annotation & condition.Status == v1.ConditionUnknown
 					if _, ok := node.Annotations["nodeunhealth"]; !ok && condition.Status == v1.ConditionUnknown {
+						// 分布式健康检测正常，则将该EndpointAddress从endpoints.Subset.NotReadyAddresses
+						// 移到endpoints.Subset.Addresses
 
-						// 删除
+						// 1、endpoints.Subset.NotReadyAddresses 删除
 						patches = append(patches, &Patch{
 							OP:   "remove",
 							Path: fmt.Sprintf("/subsets/%d/notReadyAddresses/%d", i1, i2),
 						})
 
-						// 添加
+						// 2、endpoints.Subset.Addresses 添加
 						TargetRef := map[string]interface{}{}
 						TargetRef["kind"] = EndpointAddress.TargetRef.Kind
 						TargetRef["namespace"] = EndpointAddress.TargetRef.Namespace

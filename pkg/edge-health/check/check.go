@@ -62,6 +62,7 @@ func (c CheckEdge) GetNodeList() {
 
 	// Selector represents a label selector.
 	masterSelector := labels.NewSelector()
+	// 注意操作符是 selection.DoesNotExist 非 master node（即 edge node
 	masterRequirement, err := labels.NewRequirement(common.MasterLabel, selection.DoesNotExist, []string{})
 	if err != nil {
 		klog.Errorf("can't new masterRequirement")
@@ -77,7 +78,7 @@ func (c CheckEdge) GetNodeList() {
 	/*
 		获取NodeList 检测范围
 		如果关闭了多地域
-			只检测master node
+			检测获取所有边缘节点列表
 		如果开启了多地域
 			给节点打上地域标签，检测该region 某些node（有label common.TopologyZone
 			没有给节点打上地域标签，则该节点探测时只会检测自己
@@ -91,7 +92,7 @@ func (c CheckEdge) GetNodeList() {
 				klog.Errorf("config not exist, get nodes err: %v", err)
 				return
 			} else {
-				// 只检测master node
+				// 检测获取所有边缘节点列表
 				data.NodeList.SetNodeListDataByNodeSlice(NodeList)
 			}
 		} else {
@@ -166,7 +167,7 @@ func (c CheckEdge) GetNodeList() {
 		}
 	}
 
-	// 只关心当前NodeList的NodeInternalIP的iplist，删除其他周期的checkinfo+result
+	// 只关心当前NodeList的NodeInternalIP的iplist，删除其他周期的checkinfo+result（不属于该边缘节点检查范围
 	for _, v := range data.CheckInfoResult.TraverseCheckedIpCheckInfo() {
 		if _, ok := iplist[v]; !ok {
 			data.CheckInfoResult.DeleteCheckedIpCheckInfo(v)

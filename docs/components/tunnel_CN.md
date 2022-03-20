@@ -85,7 +85,7 @@ Tunnel 管理的连接可以分为**底层连接(云端隧道的 gRPC 连接)和
 
 https://www.dumels.com/diagram/be3a3cbc-7123-4e15-9b1c-be34c600bca8
 
-![Diagram Map](https://www.dumels.com/api/v1/diagram/be3a3cbc-7123-4e15-9b1c-be34c600bca8?Sat%20Mar%2019%202022%2012:57:52%20GMT+0800%20(%E4%B8%AD%E5%9B%BD%E6%A0%87%E5%87%86%E6%97%B6%E9%97%B4))
+![Diagram Map](https://www.dumels.com/api/v1/diagram/be3a3cbc-7123-4e15-9b1c-be34c600bca8?Sat Mar 19 2022 12:57:52 GMT+0800 (中国标准时间))
 
 ## 配置文件分析
 

@@ -77,10 +77,10 @@ func (d EdgeDaemon) Run(ctx context.Context) {
 
 	//TODO: Template pattern
 
-	// 起一个goroutinue run NodeController：主要通过node Informrr处理nodeList的变动
+	// 起一个goroutinue run NodeController：主要通过node Informer处理nodeList的变动
 	go checkpkg.NewNodeController(common.ClientSet).Run(ctx)
 
-	// 同NodeController相似：起一个goroutinue run CM Controller：主要通过CM Informrr处理configMap的变动
+	// 同NodeController相似：起一个goroutinue run CM Controller：主要通过CM Informer处理configMap的变动
 	go checkpkg.NewConfigMapController(common.ClientSet).Run(ctx)
 
 	// 起一个goroutine，每隔一定的时间，运行check.GetNodeList，直到接收到结束信号 就关闭这个协程
