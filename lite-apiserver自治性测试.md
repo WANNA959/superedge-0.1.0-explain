@@ -1,3 +1,13 @@
+## superedge的lite-apiserver是否可以脱离kube-apiserver对用户提供CRD
+
+**不可以**
+
+当lite-apiserver和kube-apiserver保持连接的时候，可以正常对pod、service、deployment进行创建、查找、删除
+
+但是当kube-apiserver断开连接，lite-apiserver无法进行创建、查找、删除操作，但是运行在edge node上的pod可以正常运行（参考官方自治性实验：https://github.com/superedge/superedge/blob/main/docs/components/lite-apiserver_CN.md）
+
+具体实验测试见后文
+
 ## 安装
 
 ### edgeadm（除lite-apiserver
