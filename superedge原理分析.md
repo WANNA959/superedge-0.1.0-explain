@@ -4,45 +4,41 @@
 
 **本质：代理+缓存**
 
-- 代理：边端加了lite-apiserver组件，使得所有边端节点对于云端kube-apiserver的请求，都会指向lite-apiserver组件
-- 缓存：缓存了一些kube-apiserver请求，当遇到这些请求而且与APIServer不通的时候就直接返回给client
+- 当**云边网络正常时**，作为代理，将请求转发到kube-apiserver，把对应的返回结果（https response）返回给client，并按需将response存储到缓存中；
+- 当**云边断连时**，访问kube-apiserver超时，从缓存中获取已缓存的数据返回给client，**达到边缘自治的目的**。
 
-从整体上看，lite-apiserver 启动一个 HTTPS Server **接受所有 Client 的请求（实现方法是修改kubelet配置文件，将watch apiserver改为watch localhost:51003）**（https request），并**根据 request tls 证书中的 Common Name 选择对应的 ReverseProxy**（如果 request 没有 mtls 证书，则使用 default），**将 request 转发到 kube-apiserver**。
-
-当**云边网络正常时**，将对应的返回结果（https response）返回给client，并按需将response异步存储到缓存中；
-
-当**云边断连时**，访问kube-apiserver超时，从缓存中获取已缓存的数据返回给client，**达到边缘自治的目的**。
+从整体上看，lite-apiserver 启动一个 HTTPS Server **接受所有 Client 的请求**（https request），并**根据 request tls 证书中的 Common Name（识别持有者身份） 选择对应的 ReverseProxy**，**将 request 转发到 kube-apiserver**。
 
 ![图片](https://tva1.sinaimg.cn/large/e6c9d24ely1gzt8psboxuj20p20hamyp.jpg)
 
 ### HTTPS Server
 
--  监听 localhost 的端口（SuperEdge 中为51003）接受 Client 的 Https 请求。
-  - 实现是将kubelet.conf中cluster.server指向lite-apiserver监听地址，默认localhost:51003（默认是指向apiserver的监听地址
+- 监听 localhost 的端口（SuperEdge 中为51003）接受 Client 的 Https 请求。
+  - 实现是将边缘端kubelet.conf中cluster.server指向lite-apiserver监听地址，默认localhost:51003（默认是指向apiserver的监听地址
 
 ### Cert Mgr && Transport Mgr
 
 - Cert Mgr 负责管理连接 kube-apiserver 的 **TLS 客户端证书**。它**周期性加载配置**的TLS证书，**如果有更新，通知Transport Mgr创建或更新对应的transport**。
   - certManager.Init()
-    - 构建map：commonName-*tls.Certificate
+    - **构建map：commonName-*tls.Certificate**
 
   - certManager.Start()
     - 起一个goroutine，定期更新cert（reload loadCert、handleCertUpdate
       - 定时器正常更新周期为30min，发现需要update，则马上更新
 
     - 通过certChannel  channel同步Transport Mgr更新（new/changed cert）
-      - cm.certChannel <- commonName
+      - **cm.certChannel <- commonName**
 
-- Transport Mgr负责管理transport（传输）。它**接收Cert Mgr的通知，创建新的transport，或者关闭证书已更新的transport的旧连接**。
+- Transport Mgr负责管理transport。它**接收Cert Mgr的通知，创建新的transport，或者关闭证书已更新的transport的旧连接**。
   - transportManager.Init()
-    - 构建map：commonName-*EdgeTransport
+    - **构建map：commonName-*EdgeTransport**
   - transportManager.Start()
     - 起一个goroutine监控certChannel
       - new cert则创建新的transport
       - old cert则关闭transport旧连接
-    - 起一个gorouine监控网卡变化 if transport changed, inform handler to create new EdgeReverseProxy
+    - 起一个gorouine监控网卡变化
     - 同样通过transportChannel同步inform handler to create new EdgeReverseProxy
-      - tm.transportChannel <- commonName
+      - **tm.transportChannel <- commonName**
 
 ### Proxy
 
@@ -60,28 +56,18 @@
 
 - 支持多种cache类型，默认file_storage
   - 每个类型实现了Storage interface
-
-- 写cache时机：定义在httputil.ReverseProxy的modifyResponse下，在响应时候将response写缓存，cache对象only cache resource request（get请求）且status=http.StatusOK（cache内容包括statusCode、header、body）
+- **写cache时机**：定义在httputil.ReverseProxy的modifyResponse下，在响应时候将response写缓存
+- cache对象：只缓存对resource的get请求且status=http.StatusOK（cache内容包括statusCode、header、body）
   - key为keys := []string{userAgent, info.Namespace, info.Resource, info.Name, info.Subresource}  join
     - +list
   - **三种info.verb类型**（info, ok := apirequest.RequestInfoFrom(req.Context())
-    - verb == constant.VerbWatch（list-watch机制
-      - cacheWatch：eventType为watch.Added, watch.Modified, watch.Deleted，读list cache并更新，重新写入list cache
-
     - verb == constant.VerbList
       - cacheList-StoreList
-
     - verb == constant.VerbGet
       - cacheGet-StoreOne
-
-- 读cache时机：定义在httputil.ReverseProxy的ErrorHandler下，如timeout的时候执行
-
-
-
-
-总的来说：对于边缘节点的组件，lite-apiserver提供的功能就是kube-APIServer，但是一方面lite-apiserver只对本节点有效，另一方面资源占用很少。
-
-在网络通畅的情况下，**lite-apiserver组件对于节点组件来说是透明的**；而当网络异常情况，lite-apiserver组件会把本节点需要的数据返回给节点上组件，保证节点组件不会受网络异常情况影响。
+    - verb == constant.VerbWatch（list-watch机制
+      - cacheWatch：eventType为watch.Added, watch.Modified, watch.Deleted，读list cache并更新，重新写入list cache
+- **读cache时机**：定义在httputil.ReverseProxy的ErrorHandler下，如timeout的时候执行
 
 ## edge-health & edge-health-admission
 
@@ -104,90 +90,66 @@
 - 集群内所有节点定期投票决定各节点的状态
 - **云端和边端节点共同决定节点状态**
 
-而分布式健康检查最终的判断处理如下：
+而分布式健康检查最终的判断**处理规则**如下：
 
 ![图片](https://tva1.sinaimg.cn/large/e6c9d24ely1gzthxgqeolj20u008i3zh.jpg)
 
 ### edge-health
 
-对同区域边缘节点执行分布式健康检查，并向 apiserver 发送健康状态投票结果(给 node 打 annotation)，主体逻辑包括四部分功能：
+对同区域边缘节点执行分布式健康检查，并向 apiserver 发送健康状态投票结果(给 node 打 annotation)，**主体逻辑包括四部分功能：**
 
-#### SyncNodeList
+#### 定期同步NodeList
 
-根据边缘节点所在的 zone 刷新 node cache（**该node需要检测哪些edge node**），同时更新 CheckInfoData相关数据
+根据边缘节点所在的 zone 刷新 nodeList（**该node需要检测哪些edge node**），同时更新 CheckInfoData相关数据（malloc memory）
 
-- 定时器，默认周期10s：go wait.Until(check.GetNodeList, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done()) 
+- 定时器，默认周期10s：go wait.Until(**check.GetNodeList**, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done()) 
 - 按照如下情况分类刷新 node cache：
-  - 没有开启多地域检测：会**获取所有边缘节点列表并刷新 node cache**
+  - 没有开启**多地域检测**：会**获取所有边缘节点列表并刷新 node cache**
     - kube-system namespace 下**不存在名为 edge-health-zone-config的configmap**
     - **存在edge-health-zone-config   configmap，但数据部分** **TaintZoneAdmission 为 false**
   - 开启多地域检测：存在edge-health-zone-config  configmap，且**TaintZoneAdmission 为 true。检查是否有"superedgehealth/topology-zone"标签(标示区域)**
     - 有，则获取**该label value 相同的节点列表并刷新 node cache**
     - 无，则只会将边缘节点本身添加到分布式健康检查节点列表中并刷新 **node cache(only itself)**
 
-#### ExecuteCheck
+#### 定期执行健康检查
 
-对每个边缘节点执行若干种类的健康检查插件(ping，kubelet等)，并将各插件检查分数汇总，根据用户设置的基准线得出节点是否健康的结果
+对每个边缘节点执行若干种类的健康检查插件(ping，kubelet等)，并将**各插件检查分数**汇总，根据用户设置的**基准线**得出节点是否健康的结果
 
-- 定时器，默认周期10s：go wait.Until(check.Check, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done())
-- 目前支持ping和kubelet两种插件，**实现flag.value接口，set 添加到 PluginInfo plugin列表中**
-  - 并发执行各检查插件，并同步阻塞：同步所有插件、同步某个插件下所有node得分
+- 定时器，默认周期10s：go wait.Until(**check.Check**, time.Duration(check.GetHealthCheckPeriod())*time.Second, ctx.Done())
+- 目前支持ping和kubelet两种插件（实现了checkplugin接口），**实现flag.value接口，set方法添加到 PluginInfo plugin列表中**
+  - 并发执行各检查插件，并同步阻塞
+    - 并发同步所有插件
+    - 并发同步某个插件下所有node
   - 每个plugin对应一个权重weight，正常为100*weight，不正常为0分
     - 各plugin weight之和为1
-- 同步完成后，**统计一个checked ip下所有plugin的totalscore**，若大于HealthCheckScoreLine，则**认定为normal=true，否则为false，将结果写到ResultData**
+- 所有检测同步完成后，**统计一个checked ip下所有plugin的totalscore**，若>=HealthCheckScoreLine，则**认定为normal=true，否则为false，将结果写到ResultData**
 
-#### Commun
+#### 边缘端通信传递检测结果
 
 - 将本节点对其它各节点健康检查的结果发送给其它节点
   - 数据有效性校验：以 kube-system 下的 hmac-config configmap **hmackey 字段为 key**，对 SourceIP 以及 CheckDetail进行 hmac（**sha256） 得到，用于判断传输数据的有效性(是否被篡改)**
   - 相互发送健康结果，故需要server（接收）+client（发送）
     - go commun.Server(ctx, &wg)
       - server：监听51005，路由/result接收请求，校验hmac检查有效性，接收并decode CommunicateData
-    - go wait.Until(commun.Client, time.Duration(commun.GetPeriod())*time.Second, ctx.Done())
+    - 定时器，默认10s，go wait.Until(commun.Client, time.Duration(commun.GetPeriod())*time.Second, ctx.Done())
       - Client：desIp+51005/result发送CommunicateData（含构建hmac
   - 将得到的CommunicateData结果写入ResultData，resultDetail.time改为当前时间（不同node时间可能不同步
 
-#### Vote
+#### 投票
 
 - 对所有节点健康检查的结果分类
-  - go wait.Until(vote.Vote, time.Duration(vote.GetVotePeriod())*time.Second, ctx.Done())
+  - 定时器，默认10s，go wait.Until(**vote.Vote**, time.Duration(vote.GetVotePeriod())*time.Second, ctx.Done())
   - 三种vote结果
     - 如果超过一半(>)的节点对该节点的检查结果为正常，则认为该节点状态正常(注意时间差在 VoteTimeout 内)
-      - 对该节点删除 nodeunhealth annotation
-      - 如果node存在 NoExecute(node.kubernetes.io/unreachable) taint，则将其去掉，并更新 node.
+      - **对该节点删除 nodeunhealth annotation**
+      - 如果node存在 NoExecute(node.kubernetes.io/unreachable) taint，则将其去掉（**最坏只是NoSchedule**
     - 如果超过一半(>)的节点对该节点的检查结果为异常，则认为该节点状态异常(注意时间差在 VoteTimeout 内)
-      - 对该节点添加 nodeunhealth=yes annotation
-    - 除开上述情况，认为节点状态判断无效，对这些节点不做任何处理
+      - **对该节点添加 nodeunhealth=yes annotation**
+    - 除开上述情况（偶数，vote or not各一半），认为节点状态判断无效，对这些节点不做任何处理
 
 ### edge-health-admission
 
 - 是一种外部构造的、自定义的Kubernetes Admission Controllers，**此处为mutating admission webhook**，通过MutatingWebhookConfiguration配置，作为外部构造被调用（大多数admission内嵌在apiserver中），会对api请求进行**准入校验**以及**修改请求对象**，下面为构建的MutatingWebhookConfiguration yaml文件
-- webhook和apiserver通过AdmissionReview进行交互
-  - kube-apiserver会发送AdmissionReview给Webhooks，并封装成JSON格式
-  - Webhooks需要向kube-apiserver回应具有相同版本的AdmissionReview，并封装成JSON格式
-    - uid：拷贝发送给webhooks的AdmissionReview request.uid字段
-    - allowed：true表示准许；false表示不准许
-    - ~~status：当不准许请求时，可以通过status给出相关原因(http code and message)~~
-    - patch：base64编码，包含mutating admission webhook对请求对象的一系列JSON patch操作
-    - patchType：目前只支持JSONPatch类型
-- edge-health-admission实际上就是一个mutating admission webhook，**选择性地对endpoints以及node UPDATE请求进行修改**，包含如下处理逻辑
-  - **都调用serve函数**
-    - 解析request.Body为AdmissionReview对象，并赋值给requestedAdmissionReview
-    - 对AdmissionReview对象执行admit函数，并赋值给回responseAdmissionReview
-    - 设置responseAdmissionReview.Response.UID为请求的AdmissionReview.Request.UID
-  - 区别在于admit准入函数
-    - **nodeTaint**：不断修正被kube-controller-manager更新的**节点状态**，**去掉NoExecute(node.kubernetes.io/unreachable) taint，让节点不会被驱逐**
-      - 检查AdmissionReview.Request.Resource是否为node资源的group/version/kind
-      - 将AdmissionReview.Request.Object.Raw转化为node对象
-      - 设置AdmissionReview.Response.Allowed为true，表示无论如何都准许该请求
-      - 执行协助边端健康检查核心逻辑：在节点处于ConditionUnknown状态且分布式健康检查结果为正常的情况下，若节点存在NoExecute(node.kubernetes.io/unreachable) taint，则将其移除
-    - **endpoint**：不断修正被kube-controller-manager更新的**endpoints状态**，将**分布式健康检查正常节点上的负载从endpoints.Subset.NotReadyAddresses移到endpoints.Subset.Addresses中，让服务依旧可用**
-      - 检查AdmissionReview.Request.Resource是否为endpoints资源的group/version/kind
-      - 将AdmissionReview.Request.Object.Raw转化为endpoints对象
-      - 设置AdmissionReview.Response.Allowed为true，表示无论如何都准许该请求
-      - 遍历endpoints.Subset.NotReadyAddresses，如果EndpointAddress所在节点处于ConditionUnknown状态且分布式健康检查结果为正常，则将该EndpointAddress从endpoints.Subset.NotReadyAddresses移到endpoints.Subset.Addresses
-        - 从endpoints.Subset.NotReadyAddresses删除
-        - 添加到endpoints.Subset.Addresses
 
 ```yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -225,8 +187,37 @@ webhooks:
 ...
 ```
 
-- 不断根据 node edge-health annotation 调整 kube-controller-manager 设置的 **node taint**(去掉 NoExecute taint)以及**endpoints**(将失联节点上的 pods 从 endpoint subsets notReadyAddresses 移到 addresses中)，从而实现云端和边端共同决定节点状态
-- 之所以创建edge-health-admission云端组件，是因为当云边断连时，kube-controller-manager会将失联的节点置为ConditionUnknown状态，并添加NoSchedule和NoExecute的taints；同时失联的节点上的pod从Service的Endpoint列表中移除。当edge-health-daemon在边端根据健康检查判断节点状态正常时，会更新node：去掉NoExecute taint。但是在node成功更新之后又会被kube-controller-manager给刷回去(再次添加NoExecute taint)，因此必须添加Kubernetes mutating admission webhook也即edge-health-admission，将kube-controller-manager对node api resource的更改做调整，最终实现分布式健康检查效果
+- webhook和apiserver通过AdmissionReview进行交互
+  - apiserver会发送AdmissionReview给Webhooks，并封装成JSON格式
+  - Webhooks需要向kube-apiserver回应具有相同版本的AdmissionReview，并封装成JSON格式
+    - uid：=apiserver发送给webhooks的AdmissionReview request.uid字段
+    - allowed：true表示准许；false表示不准许
+    - ~~status：当不准许请求时，可以通过status给出相关原因(http code and message)~~
+    - patch：base64编码，包含mutating admission webhook对请求对象的一系列JSON patch操作（局部修改）
+    - patchType：目前只支持JSONPatch类型
+- 为什么创建edge-health-admission云端组件？
+  - 根据原生kubernetes节点断连规则：云边断连时，kube-controller-manager会将失联的节点置为ConditionUnknown状态，并添加NoSchedule和NoExecute的taints；同时失联的节点上的pod从Service的Endpoint列表中移除。
+  - 当edge-health-daemon**在边端根据健康检查判断节点状态正常时，会更新node：去掉NoExecute taint。**
+    - 但是在node成功更新之后又会被**kube-controller-manager给刷回去(再次添加NoExecute taint)**，因此必须添加Kubernetes mutating admission webhook也即edge-health-admission，**将kube-controller-manager对node api resource的更改做调整，最终实现分布式健康检查效果**
+
+- edge-health-admission实际上就是一个mutating admission webhook，**选择性地对endpoints以及node 的UPDATE请求进行修改**，包含如下处理逻辑
+  - **都调用serve函数：公共操作**
+    - **解析request.Body为AdmissionReview对象**，并赋值给requestedAdmissionReview
+    - 对AdmissionReview对象**执行admit函数**，并赋值给回responseAdmissionReview
+    - 设置responseAdmissionReview.**Response.UID**为请求的AdmissionReview.**Request.UID**
+  - 区别在于admit准入函数
+    - **nodeTaint**：不断修正被controller-manager更新的**节点状态**，**去掉NoExecute(node.kubernetes.io/unreachable) taint，让节点不会被驱逐**
+      - 检查AdmissionReview.Request.**Resource是否为node资源**的group/version/kind
+      - 将AdmissionReview.Request.**Object.Raw转化为node对象**
+      - 设置AdmissionReview.Response.**Allowed为true，表示无论如何都准许该请求**
+      - 执行协助边端健康检查核心逻辑：**在节点处于ConditionUnknown状态且分布式健康检查结果为正常（没有nodeunhealth annotation）的情况下，若节点存在NoExecute(node.kubernetes.io/unreachable) taint，则将其移除**
+    - **endpoint**：不断修正被controller-manager更新的**endpoints状态**，将**分布式健康检查正常节点上的负载从endpoints.Subset.NotReadyAddresses移到endpoints.Subset.Addresses中，让服务依旧可用**
+      - 检查AdmissionReview.Request.**Resource是否为endpoints资源**的group/version/kind
+      - 将AdmissionReview.Request.**Object.Raw转化为endpoints对象**
+      - 设置AdmissionReview.Response.**Allowed为true，表示无论如何都准许该请求**
+      - 遍历endpoints.Subset.NotReadyAddresses，如果EndpointAddress所在**节点处于ConditionUnknown状态且分布式健康检查结果为正常**，则将**该EndpointAddress从endpoints.Subset.NotReadyAddresses移到endpoints.Subset.Addresses**
+        - **从endpoints.Subset.NotReadyAddresses删除**
+        - **添加到endpoints.Subset.Addresses**
 
 ## tunnel
 
@@ -267,11 +258,12 @@ Tunnel 管理的连接可以分为**底层连接(云端隧道的 gRPC 连接)和
   - stream.send起两个goroutine（wrappedClientStream.SendMsg + wrappedClientStream.RecvMsg）
   - cloud端：stream.go go connect.StartServer() →grpcserver.go StartServer →streamserver.go TunnelStreaming →streaminterceptor.go wrappedClientStream（sendMsg、RecvMsg）
   - edge端：stream.go go connect.StartSendClient()→grpcclient.go StartSendClient →streamclient.go Send()→streaminterceptor.go wrappedServerStream（sendMsg、RecvMsg）
-  
 - **边缘节点上 tunnel-edge 主动连接云端 tunnel-cloud service**，tunnel-cloud service 根据负载均衡策略将请求转到tunnel-cloud pod
 - tunnel-edge 与 tunnel-cloud 建立 gRPC 连接后，tunnel-cloud 会把自身的 podIp 和 tunnel-edge 所在节点的 nodeName 的映射写入**tunnel-coredns**。gRPC 连接断开之后，tunnel-cloud 会删除相关 podIp 和节点名的映射
 - tunnel-edge 会利用边缘节点名以及 token 构建 gRPC 连接，**而 tunnel-cloud 会通过认证信息解析 gRPC 连接对应的边缘节点（一个cloud可能对应多个edge node）**，并对每个边缘节点分别构建一个 wrappedServerStream 进行处理(同一个 tunnel-cloud 可以处理多个 tunnel-edge 的连接)
-- **tunnel-cloud** 每隔一分钟(考虑到 configmap 同步 tunnel-cloud 的 pod 挂载文件的时间)**向 tunnel-coredns 的 hosts 插件的配置文件对应 configmap 同步一次边缘节点名以及 tunnel-cloud podIp 的映射（**内存同步configmap**
+  - ServerStreamInterceptor中ParseToken获取nodeName，构建 newServerWrappedStream(ss, auth.NodeName)
+- **tunnel-cloud** 每隔一分钟(考虑到 configmap 同步 tunnel-cloud 的 pod 挂载文件的时间)**向 tunnel-coredns 的 hosts 插件的配置文件对应 configmap 同步一次边缘节点名以及 tunnel-cloud podIp 的映射（**内存同步configmap
+  - go connect.SynCorefile()  1min为周期更新
 
 ![img](https://tva1.sinaimg.cn/large/e6c9d24ely1h0fj65nsixj20k108xgm1.jpg)
 
@@ -317,3 +309,6 @@ Tunnel 管理的连接可以分为**底层连接(云端隧道的 gRPC 连接)和
 
 - https://blog.csdn.net/yunxiao6/article/details/117023803
 - https://github.com/khalid-jobs/tunnel
+
+
+

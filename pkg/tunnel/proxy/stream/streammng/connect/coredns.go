@@ -67,7 +67,7 @@ func InitDNS() error {
 
 // checkHosts 负责 configmap 具体的刷新操作
 func (dns *CoreDns) checkHosts() error {
-	nodes, flag := parseHosts()
+	nodes, flag := parseHosts() // edge node name-pod ip
 	if !flag {
 		return nil
 	}
@@ -78,6 +78,7 @@ func (dns *CoreDns) checkHosts() error {
 		hostsBuffer.WriteString(k)
 		hostsBuffer.WriteString("\n")
 	}
+	//proxy-nodes configmap
 	cm, err := dns.ClientSet.CoreV1().ConfigMaps(dns.Namespace).Get(cctx.TODO(), conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Configmap, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("get configmap fail err = %v", err)
@@ -88,6 +89,7 @@ func (dns *CoreDns) checkHosts() error {
 	} else {
 		cm.Data[util.COREFILE_HOSTS_FILE] = ""
 	}
+	// 更新configmap
 	_, err = dns.ClientSet.CoreV1().ConfigMaps(dns.Namespace).Update(cctx.TODO(), cm, metav1.UpdateOptions{})
 	if err != nil {
 		klog.Errorf("update configmap fail err = %v", err)
@@ -111,7 +113,7 @@ func SynCorefile() {
 
 /*
 parseHosts 获取本地 hosts 文件中 边缘节点名称 以及 对应 tunnel-cloud podIp 映射列表
-对比 podIp 的对应节点名和内存中节点名，如果有变化则将这个内容覆盖写入 configmap 并更新
+对比 host中podIp的对应节点名 和 内存中节点名（nodeContext），如果有变化则将这个内容覆盖写入 configmap 并更新
 */
 func parseHosts() (map[string]string, bool) {
 	// 从文件读hosts
@@ -120,6 +122,7 @@ func parseHosts() (map[string]string, bool) {
 		klog.Errorf("load hosts fail! err = %v", err)
 		return nil, false
 	}
+	// host文件映射 f[0]为pod ip f[1]为node name
 	scanner := bufio.NewScanner(file)
 	//mode.cloud.stream.dns.service对应的endpoints
 	eps, err := coreDns.ClientSet.CoreV1().Endpoints(coreDns.Namespace).Get(cctx.Background(), conf.TunnelConf.TunnlMode.Cloud.Stream.Dns.Service, metav1.GetOptions{})
@@ -139,7 +142,7 @@ func parseHosts() (map[string]string, bool) {
 			update = true
 			continue
 		}
-		// ip address
+		// pod ip address
 		addr := parseIP(string(f[0]))
 		if addr == nil {
 			update = true
@@ -148,6 +151,7 @@ func parseHosts() (map[string]string, bool) {
 		// 当前cloud node ip一致
 		if addr.String() == coreDns.PodIp {
 			if !update {
+				// 当前nodeContext中有此node
 				if context.GetContext().NodeIsExist(string(f[1])) {
 					existCount += 1
 				} else {
@@ -156,18 +160,22 @@ func parseHosts() (map[string]string, bool) {
 			}
 			continue
 		} else {
-			orphan := true
+			orphan := true // 该pod ip是否在service的endpoint时钟 true表示不在
 			for _, ipv := range eps.Subsets[0].Addresses {
+				// addr = service对应的若干cloud pod ip
 				if addr.String() == ipv.IP {
+					// 当前nodeContext中有此node
 					if context.GetContext().NodeIsExist(string(f[1])) {
 						update = true
 					} else {
+						// todo ?
 						nodes[string(f[1])] = addr.String()
 					}
 					orphan = false
 					break
 				}
 			}
+			// 不在
 			if orphan {
 				update = true
 			}
@@ -175,11 +183,13 @@ func parseHosts() (map[string]string, bool) {
 
 	}
 	file.Close()
+	// update=true表示 node name都更新为本cloud pod ip
 	if update {
 		for _, v := range context.GetContext().GetNodes() {
 			nodes[v] = coreDns.PodIp
 		}
 	} else {
+		// 全部置为本cloud pod ip
 		if existCount != len(context.GetContext().GetNodes()) || disconnectCount != 0 {
 			for _, v := range context.GetContext().GetNodes() {
 				nodes[v] = coreDns.PodIp
