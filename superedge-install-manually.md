@@ -68,13 +68,229 @@ openssl x509 -req -days 365 -in tunnel_proxy_server.csr -CA ca.crt -CAkey ca.key
 
 ```
 export TunnelCloudEdgeToken=OIauTBIqmkRFN5xM7l1bLbpNeF1OsLVY
-TunnelPersistentConnectionServerCrt=$(cat tunnel_persistent_connectiong_server.key | base64 --wrap=0)
-TunnelPersistentConnectionServerKey=$(cat tunnel_persistent_connectiong_server.crt | base64 --wrap=0)
-TunnelPersistentConnectionServerCrt=$(cat tunnel_proxy_server.key | base64 --wrap=0)
-TunnelPersistentConnectionServerKey=$(cat tunnel_proxy_server.crt | base64 --wrap=0)
+export TunnelPersistentConnectionServerCrt=$(cat tunnel_persistent_connectiong_server.key | base64 --wrap=0)
+export TunnelPersistentConnectionServerKey=$(cat tunnel_persistent_connectiong_server.crt | base64 --wrap=0)
+export TunnelPersistentConnectionServerCrt=$(cat tunnel_proxy_server.key | base64 --wrap=0)
+export TunnelPersistentConnectionServerKey=$(cat tunnel_proxy_server.crt | base64 --wrap=0)
+
+cat << EOF > /root/go_project/superedge/deployment/my-tunnel-cloud.yaml
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tunnel-cloud
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tunnel-cloud
+  namespace: edge-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tunnel-cloud
+subjects:
+  - kind: ServiceAccount
+    name: tunnel-cloud
+    namespace: edge-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tunnel-cloud
+  namespace: edge-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tunnel-cloud-conf
+  namespace: edge-system
+data:
+  tunnel_cloud.toml: |
+    [mode]
+        [mode.cloud]
+            [mode.cloud.stream]
+                [mode.cloud.stream.server]
+                    grpcport = 9000
+                    logport = 51010
+                    metricsport = 6000
+                    key = "/etc/superedge/tunnel/certs/tunnel-cloud-server.key"
+                    cert = "/etc/superedge/tunnel/certs/tunnel-cloud-server.crt"
+                    tokenfile = "/etc/superedge/tunnel/token/token"
+                [mode.cloud.stream.dns]
+                     configmap="tunnel-nodes"
+                     hosts = "/etc/superedge/tunnel/nodes/hosts"
+                     service = "tunnel-cloud"
+            [mode.cloud.tcp]
+                "0.0.0.0:6443" = "127.0.0.1:6443"
+            [mode.cloud.https]
+                cert ="/etc/superedge/tunnel/certs/apiserver-kubelet-server.crt"
+                key = "/etc/superedge/tunnel/certs/apiserver-kubelet-server.key"
+                [mode.cloud.https.addr]
+                    "10250" = "127.0.0.1:10250"
+                    "9100" = "127.0.0.1:9100"
+                    "30021" = "127.0.0.1:30021"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tunnel-cloud-token
+  namespace: edge-system
+data:
+  token: |
+    default:${TunnelCloudEdgeToken}
+---
+apiVersion: v1
+data:
+  tunnel-cloud-server.crt: '${TunnelPersistentConnectionServerCrt}'
+  tunnel-cloud-server.key: '${TunnelPersistentConnectionServerKey}'
+  apiserver-kubelet-server.crt: '${TunnelProxyServerCrt}'
+  apiserver-kubelet-server.key: '${TunnelProxyServerKey}'
+kind: Secret
+metadata:
+  name: tunnel-cloud-cert
+  namespace: edge-system
+type: Opaque
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tunnel-cloud
+  namespace: edge-system
+spec:
+  ports:
+    - name: grpc
+      port: 9000
+      protocol: TCP
+      targetPort: 9000
+    - name: ssh
+      port: 22
+      protocol: TCP
+      targetPort: 22
+    - name: tunnel-metrics
+      port: 6000
+      protocol: TCP
+      targetPort: 6000
+  selector:
+    app: tunnel-cloud
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: tunnel-cloud
+  name: tunnel-cloud
+  namespace: edge-system
+spec:
+  selector:
+    matchLabels:
+      app: tunnel-cloud
+  template:
+    metadata:
+      labels:
+        app: tunnel-cloud
+    spec:
+      serviceAccount: tunnel-cloud
+      serviceAccountName: tunnel-cloud
+      containers:
+        - name: tunnel-cloud
+          image: superedge.tencentcloudcr.com/superedge/tunnel:v0.7.0
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            httpGet:
+              path: /cloud/healthz
+              port: 51010
+            initialDelaySeconds: 10
+            periodSeconds: 60
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 1
+          command:
+            - /usr/local/bin/tunnel
+          args:
+            - --m=cloud
+            - --c=/etc/superedge/tunnel/conf/tunnel_cloud.toml
+            - --log-dir=/var/log/tunnel
+            - --alsologtostderr
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: token
+              mountPath: /etc/superedge/tunnel/token
+            - name: certs
+              mountPath: /etc/superedge/tunnel/certs
+            - name: hosts
+              mountPath: /etc/superedge/tunnel/nodes
+            - name: conf
+              mountPath: /etc/superedge/tunnel/conf
+          ports:
+            - containerPort: 9000
+              name: grpc
+              protocol: TCP
+            - containerPort: 22
+              name: ssh
+              protocol: TCP
+            - containerPort: 10250
+              name: kubelet
+              protocol: TCP
+            - containerPort: 6443
+              name: apiserver
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 50m
+              memory: 100Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+      volumes:
+        - name: token
+          configMap:
+            name: tunnel-cloud-token
+        - name: certs
+          secret:
+            secretName: tunnel-cloud-cert
+        - name: hosts
+          configMap:
+            name: tunnel-nodes
+        - name: conf
+          configMap:
+            name: tunnel-cloud-conf
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      tolerations:
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
+EOF
 
 # 部署 deployment/tunnel-cloud.yaml
-envsubst < deployment/tunnel-cloud.yaml | kubectl apply -f -
+kubectl apply -f deployment/my-tunnel-cloud.yaml
 ```
 
 ### kube-apiserver使用tunnel
@@ -172,10 +388,10 @@ status: {}
 EOF
 ```
 
-### todo 部署tunnel-edge
+### 部署tunnel-edge
 
 - 将ca.crt kubelet_client.key kubelet_client.crt拷贝到边缘node /etc/superedge/tunnel/certs/
-  - scp root@master:/root/go_project/superedge/cert/tunnel/*  /root/cert/
+  - scp root@master:/root/go_project/superedge/cert/tunnel/*  /etc/superedge/tunnel/certs/
 
 ```
 # private key
@@ -188,12 +404,146 @@ openssl ca -in kubelet_client.csr -out kubelet_client.crt -cert ca.crt -keyfile 
 
 openssl x509 -req -days 365 -in kubelet_client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out kubelet_client.crt
 
+cp /etc/kubernetes/pki/apiserver-kubelet-client.* ./
+
 export TunnelCloudEdgeToken=OIauTBIqmkRFN5xM7l1bLbpNeF1OsLVY
-export KubernetesCaCert=$(cat ca.key | base64 --wrap=0)
-export KubeletClientCrt=$(cat kubelet_client.crt | base64 --wrap=0)
-export KubeletClientKey=$(cat kubelet_client.key | base64 --wrap=0)
+export KubernetesCaCert=$(cat ca.crt | base64 --wrap=0)
+export KubeletClientCrt=$(cat apiserver-kubelet-client.crt | base64 --wrap=0)
+export KubeletClientKey=$(cat apiserver-kubelet-client.key | base64 --wrap=0)
+
+cat << EOF > /root/go_project/superedge/deployment/my-tunnel-edge.yaml
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: tunnel-edge
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tunnel-edge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tunnel-edge
+subjects:
+  - kind: ServiceAccount
+    name: tunnel-edge
+    namespace: edge-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tunnel-edge
+  namespace: edge-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tunnel-edge-conf
+  namespace: edge-system
+data:
+  tunnel_edge.toml: |
+    [mode]
+        [mode.edge]
+            [mode.edge.stream]
+                [mode.edge.stream.client]
+                    token = "${TunnelCloudEdgeToken}"
+                    cert = "/etc/superedge/tunnel/certs/cluster-ca.crt"
+                    dns = "tunnel.cloud.io"
+                    servername = "192.168.92.100:52222"
+                    logport = 51010
+                [mode.edge.https]
+                    cert= "/etc/superedge/tunnel/certs/apiserver-kubelet-client.crt"
+                    key=  "/etc/superedge/tunnel/certs/apiserver-kubelet-client.key"
+---
+apiVersion: v1
+data:
+  cluster-ca.crt: '${KubernetesCaCert}'
+  apiserver-kubelet-client.crt: '${KubeletClientCrt}'
+  apiserver-kubelet-client.key: '${KubeletClientKey}'
+kind: Secret
+metadata:
+  name: tunnel-edge-cert
+  namespace: edge-system
+type: Opaque
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: tunnel-edge
+  namespace: edge-system
+spec:
+  selector:
+    matchLabels:
+      app: tunnel-edge
+  template:
+    metadata:
+      labels:
+        app: tunnel-edge
+    spec:
+      hostNetwork: true
+      containers:
+        - name: tunnel-edge
+          image: superedge.tencentcloudcr.com/superedge/tunnel:v0.7.0
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            httpGet:
+              path: /edge/healthz
+              port: 51010
+            initialDelaySeconds: 10
+            periodSeconds: 180
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: 20m
+              memory: 40Mi
+            requests:
+              cpu: 10m
+              memory: 10Mi
+          command:
+            - /usr/local/bin/tunnel
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          args:
+            - --m=edge
+            - --c=/etc/superedge/tunnel/conf/tunnel_edge.toml
+            - --log-dir=/var/log/tunnel
+            - --alsologtostderr
+          volumeMounts:
+            - name: certs
+              mountPath: /etc/superedge/tunnel/certs
+            - name: conf
+              mountPath: /etc/superedge/tunnel/conf
+      volumes:
+        - secret:
+            secretName: tunnel-edge-cert
+          name: certs
+        - configMap:
+            name: tunnel-edge-conf
+          name: conf
+EOF
+
+kubectl apply -f deployment/my-tunnel-edge.yaml
 
 envsubst < deployment/tunnel-edge.yaml | kubectl apply -f -
+```
+
+```
+kubectl delete daemonsets.apps -n edge-system tunnel-edge
+kubectl delete secrets -n edge-system tunnel-edge-cert
+
+kubectl describe secrets -n edge-system tunnel-edge-cert
 ```
 
 ## 部署lite-apiserver
