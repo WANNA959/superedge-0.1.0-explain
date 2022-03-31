@@ -41,6 +41,9 @@ openssl genrsa -des3 -out tunnel_persistent_connectiong_server.key 2048
 # generate csr
 openssl req -new -key tunnel_persistent_connectiong_server.key -subj "/CN=tunnel-cloud" -out tunnel_persistent_connectiong_server.csr
 
+# !!!!! openssl生成的private key在go中无法解析 server.key包含了公钥和密钥两部分,需另取出私钥.
+openssl rsa -in  tunnel_persistent_connectiong_server.key -out server_pri.key
+
 # Add DNS and IP, 必须填写 "DNS:tunnelcloud.io"
 echo "subjectAltName=DNS:tunnelcloud.io,IP:127.0.0.1" > tunnel_persistent_connectiong_server_cert_extensions
 
@@ -57,6 +60,9 @@ openssl genrsa -des3 -out tunnel_proxy_server.key 2048
 # generate csr
 openssl req -new -key tunnel_proxy_server.key -subj "/CN=tunnel-cloud" -out tunnel_proxy_server.csr
 
+# !!!!! openssl生成的private key在go中无法解析 server.key包含了公钥和密钥两部分,需另取出私钥.
+openssl rsa -in  tunnel_proxy_server.key -out server_pri2.key
+
 # Add DNS and IP
 echo "subjectAltName=DNS:superedge.io,IP:127.0.0.1" > cert_extensions
 
@@ -66,12 +72,15 @@ openssl x509 -req -days 365 -in tunnel_proxy_server.csr -CA ca.crt -CAkey ca.key
 
 - 设置环境变量
 
-```
+```shell
 export TunnelCloudEdgeToken=OIauTBIqmkRFN5xM7l1bLbpNeF1OsLVY
-export TunnelPersistentConnectionServerCrt=$(cat tunnel_persistent_connectiong_server.key | base64 --wrap=0)
-export TunnelPersistentConnectionServerKey=$(cat tunnel_persistent_connectiong_server.crt | base64 --wrap=0)
-export TunnelPersistentConnectionServerCrt=$(cat tunnel_proxy_server.key | base64 --wrap=0)
-export TunnelPersistentConnectionServerKey=$(cat tunnel_proxy_server.crt | base64 --wrap=0)
+export TunnelPersistentConnectionServerCrt=$(cat tunnel_persistent_connectiong_server.crt | base64 --wrap=0)
+#export TunnelPersistentConnectionServerKey=$(cat tunnel_persistent_connectiong_server.key | base64 --wrap=0)
+export TunnelPersistentConnectionServerKey=$(cat server_pri.key | base64 --wrap=0)
+
+#export TunnelProxyServerCrt=$(cat tunnel_proxy_server.crt | base64 --wrap=0)
+export TunnelProxyServerCrt=$(cat tunnel_proxy_server.crt | base64 --wrap=0)
+export TunnelProxyServerKey=$(cat server_pri2.key | base64 --wrap=0)
 
 cat << EOF > /root/go_project/superedge/deployment/my-tunnel-cloud.yaml
 ---
@@ -290,6 +299,7 @@ spec:
 EOF
 
 # 部署 deployment/tunnel-cloud.yaml
+kubectl delete -f deployment/my-tunnel-cloud.yaml
 kubectl apply -f deployment/my-tunnel-cloud.yaml
 ```
 
@@ -455,7 +465,7 @@ data:
                     token = "${TunnelCloudEdgeToken}"
                     cert = "/etc/superedge/tunnel/certs/cluster-ca.crt"
                     dns = "tunnel.cloud.io"
-                    servername = "192.168.92.100:52222"
+                    servername = "192.168.92.100:31526"
                     logport = 51010
                 [mode.edge.https]
                     cert= "/etc/superedge/tunnel/certs/apiserver-kubelet-client.crt"
@@ -520,6 +530,7 @@ spec:
             - --c=/etc/superedge/tunnel/conf/tunnel_edge.toml
             - --log-dir=/var/log/tunnel
             - --alsologtostderr
+            - --v=8
           volumeMounts:
             - name: certs
               mountPath: /etc/superedge/tunnel/certs
@@ -534,9 +545,8 @@ spec:
           name: conf
 EOF
 
+kubectl delete -f deployment/my-tunnel-edge.yaml
 kubectl apply -f deployment/my-tunnel-edge.yaml
-
-envsubst < deployment/tunnel-edge.yaml | kubectl apply -f -
 ```
 
 ```
@@ -723,6 +733,10 @@ hmackey=$(cat /dev/urandom | tr -dc '[:alnum:]' | head -c16)
 # 使用DaemonSet方式，将edge-health部署在边缘Node节点中
 kubectl apply -f deployment/edge-health.yaml
 ```
+
+## 效果图
+
+![image-20220331135331909](https://tva1.sinaimg.cn/large/e6c9d24ely1h0t0sqq1jvj21nw0u0gtj.jpg)
 
 ## Reference
 
