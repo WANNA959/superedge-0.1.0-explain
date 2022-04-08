@@ -1,5 +1,7 @@
 # 手动部署superedge
 
+此部分作为后备方案
+
 ## 部署tunnel
 
 ### 部署tunnel-coredns
@@ -182,6 +184,7 @@ spec:
       port: 9000
       protocol: TCP
       targetPort: 9000
+      nodePort: 30888
     - name: ssh
       port: 22
       protocol: TCP
@@ -232,6 +235,7 @@ spec:
             - --c=/etc/superedge/tunnel/conf/tunnel_cloud.toml
             - --log-dir=/var/log/tunnel
             - --alsologtostderr
+            - --v=8
           env:
             - name: POD_IP
               valueFrom:
@@ -297,7 +301,7 @@ spec:
           operator: "Exists"
           effect: "NoSchedule"
 EOF
-
+superedge.tencentcloudcr.com/
 # 部署 deployment/tunnel-cloud.yaml
 kubectl delete -f deployment/my-tunnel-cloud.yaml
 kubectl apply -f deployment/my-tunnel-cloud.yaml
@@ -398,7 +402,7 @@ status: {}
 EOF
 ```
 
-### 部署tunnel-edge
+### todo*部署tunnel-edge
 
 - 将ca.crt kubelet_client.key kubelet_client.crt拷贝到边缘node /etc/superedge/tunnel/certs/
   - scp root@master:/root/go_project/superedge/cert/tunnel/*  /etc/superedge/tunnel/certs/
@@ -406,6 +410,9 @@ EOF
 ```
 # private key
 openssl genrsa -des3 -out kubelet_client.key 1024
+
+openssl rsa -in  apiserver-kubelet-client.key -out server_pri3.key
+
 # generate csr
 openssl req -new -key kubelet_client.key -out kubelet_client.csr
 # Generate Self Signed certificate（注意ca.crt和ca.key为集群的证书, Kubeadm部署的集群中，CA是/etc/kubernetes/pki下的ca.crt和ca.key）
@@ -419,6 +426,8 @@ cp /etc/kubernetes/pki/apiserver-kubelet-client.* ./
 export TunnelCloudEdgeToken=OIauTBIqmkRFN5xM7l1bLbpNeF1OsLVY
 export KubernetesCaCert=$(cat ca.crt | base64 --wrap=0)
 export KubeletClientCrt=$(cat apiserver-kubelet-client.crt | base64 --wrap=0)
+export KubeletClientKey=$(cat server_pri3.key | base64 --wrap=0)
+
 export KubeletClientKey=$(cat apiserver-kubelet-client.key | base64 --wrap=0)
 
 cat << EOF > /root/go_project/superedge/deployment/my-tunnel-edge.yaml
@@ -465,7 +474,7 @@ data:
                     token = "${TunnelCloudEdgeToken}"
                     cert = "/etc/superedge/tunnel/certs/cluster-ca.crt"
                     dns = "tunnel.cloud.io"
-                    servername = "192.168.92.100:31526"
+                    servername = "192.168.92.100:30888"
                     logport = 51010
                 [mode.edge.https]
                     cert= "/etc/superedge/tunnel/certs/apiserver-kubelet-client.crt"
@@ -585,7 +594,7 @@ spec:
         - --v=4
         - --file-cache-path=/data/lite-apiserver/cache
         - --timeout=3
-      # image: superedge.tencentcloudcr.com/superedge/lite-apiserver:v0.1.0
+      # image: superedge.tencentcloudcr.com/superedge/lite-apiserver:v0.7.0
       image: superedge/lite-apiserver:v0.1.0
       imagePullPolicy: IfNotPresent
       name: lite-apiserver
@@ -673,7 +682,7 @@ EOF
 
 - 修改kubelet.conf中的cluster.server为 https://127.0.0.1:51003
 
-```
+```shell
 cat << EOF > /etc/kubernetes/kubelet.conf
 apiVersion: v1
 clusters:
@@ -730,6 +739,7 @@ kubectl apply -f deployment/edge-health-webhook.yaml
 
 #HmacKey：分布式健康检查，edge-health的消息验证key，至少16位随机字符串
 hmackey=$(cat /dev/urandom | tr -dc '[:alnum:]' | head -c16)
+
 # 使用DaemonSet方式，将edge-health部署在边缘Node节点中
 kubectl apply -f deployment/edge-health.yaml
 ```
